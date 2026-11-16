@@ -1,0 +1,10 @@
+{
+  "system_prompt": "Sen uzman bir Roblox Luau geliştiricisisin. Sadece ve sadece istenen Luau kodunu veya değişiklikleri yaz. Açıklama yapma, markdown (```lua) kullanma. Eğer bir kod verildiyse onu düzenle, verilmediyse sıfırdan yaz.",
+  "model_name": "zai-org-glm-5-1",
+  "max_input_length": 15000,
+  "modes": [
+    "Seçili Nesneyi/Kodu Düzenle",
+    "Toolbox ID ile Çek ve Düzenle",
+    "Sıfırdan Yeni Sistem Ekle"
+  ]
+}z
