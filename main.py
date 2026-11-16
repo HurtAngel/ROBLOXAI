@@ -12,7 +12,7 @@ CONFIG_FILE = "config.json"
 
 REQUEST_LOGS = []
 ERROR_LOGS = []
-LIVE_STREAM_STATE = {"status": "Boşta", "buffer": "", "updated_at": ""}
+LIVE_STREAM_STATE = {"status": "Boşta", "buffer": "", "updated_at": "", "active": False}
 
 def get_config():
     if os.path.exists(CONFIG_FILE):
@@ -38,23 +38,15 @@ def add_error_log(err_type: str, details: str, raw_output: str = ""):
     })
 
 def extract_and_repair_json(raw_text: str) -> dict:
-    """
-    Yapay zekadan dönen metindeki <think> bloklarını, markdown işaretlerini ve
-    bozuk satır sonu karakterlerini temizleyip %100 geçerli bir Python dict döndürür.
-    JSON çıkarılamazsa ama içinde Luau kodu varsa otomatik aksiyona dönüştürür.
-    """
     if not raw_text or not raw_text.strip():
         raise ValueError("Yapay zeka boş yanıt döndürdü (API anahtarınızı veya model adını kontrol edin).")
 
-    # 1. <think>...</think> bloklarını kaldır
     cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
 
-    # 2. ```json ... ``` bloğu varsa içini al
     fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", cleaned, flags=re.DOTALL)
     if fenced:
         candidate = fenced.group(1).strip()
     else:
-        # İlk '{' ile son '}' arasını al
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:
@@ -62,7 +54,6 @@ def extract_and_repair_json(raw_text: str) -> dict:
         else:
             candidate = cleaned
 
-    # 3. strict=False ile ayrıştırmayı dene (string içindeki ham \n ve \t karakterlerini kabul eder)
     try:
         parsed = json.loads(candidate, strict=False)
         if isinstance(parsed, dict):
@@ -74,7 +65,6 @@ def extract_and_repair_json(raw_text: str) -> dict:
     except Exception:
         pass
 
-    # 4. Sonda kalan fazladan virgülleri (trailing commas) temizleyip tekrar dene
     try:
         fixed_commas = re.sub(r",\s*([\]}])", r"\1", candidate)
         parsed = json.loads(fixed_commas, strict=False)
@@ -83,23 +73,17 @@ def extract_and_repair_json(raw_text: str) -> dict:
     except Exception:
         pass
 
-    # 5. Eğer model direkt Luau kodu döndürdüyse (JSON unuttuysa), otomatik olarak aksiyona sar!
     lua_match = re.search(r"```(?:lua|luau)?\s*(.*?)\s*```", cleaned, flags=re.DOTALL)
     code_content = lua_match.group(1) if lua_match else cleaned
     return {
         "thought": "Model doğrudan Luau kodu üretti, otomatik olarak script/komut aksiyonuna dönüştürüldü.",
-        "actions": [
-            {
-                "type": "fallback_code",
-                "source": code_content
-            }
-        ]
+        "actions": [{"type": "fallback_code", "source": code_content}]
     }
 
 @app.get("/", response_class=HTMLResponse)
 async def admin_dashboard():
-    return """
-<!DOCTYPE html>
+    # r""" (raw string) sayesinde JavaScript içindeki \n karakterleri asla bozulmaz
+    return r"""<!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
@@ -129,7 +113,7 @@ async def admin_dashboard():
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
         label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
-        input, textarea, select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 10px 13px; border-radius: 8px; margin-bottom: 14px; font-size: 13px; font-family: monospace; }
+        input, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 10px 13px; border-radius: 8px; margin-bottom: 14px; font-size: 13px; font-family: monospace; }
         input:focus, textarea:focus { outline: none; border-color: var(--accent); }
         .btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; transition: 0.15s; }
         .btn:hover { background: var(--accent-hover); }
@@ -161,7 +145,6 @@ async def admin_dashboard():
         <div class="stat-box"><div class="stat-title">Toplam İstek / Hata</div><div class="stat-val" id="stat-counts">0 / 0</div></div>
     </div>
 
-    <!-- TAB 1: API & MODELLER -->
     <div id="tab-models" class="tab-content active">
         <div class="card">
             <h3>🔑 Venice.ai API & Model Yapılandırması</h3>
@@ -169,36 +152,26 @@ async def admin_dashboard():
             <input type="password" id="api_key" placeholder="Venice.ai API anahtarınızı buraya yapıştırın...">
             
             <div class="grid-2">
-                <div><label>API Base URL</label><input type="text" id="base_url" value="[https://api.venice.ai/api/v1](https://api.venice.ai/api/v1)"></div>
+                <div><label>API Base URL</label><input type="text" id="base_url" value="https://api.venice.ai/api/v1"></div>
                 <div><label>Maksimum Girdi Karakter Sınırı</label><input type="number" id="max_input_length" value="80000"></div>
             </div>
 
             <div class="grid-3">
-                <div>
-                    <label>Sohbet & Kodlama Modeli (/chat/completions)</label>
-                    <input type="text" id="chat_model" placeholder="gemini-4-hydrogen">
-                </div>
-                <div>
-                    <label>Görsel & Texture Modeli (/images/generations)</label>
-                    <input type="text" id="image_model" placeholder="seedream-v5-5">
-                </div>
-                <div>
-                    <label>Görsel Çözünürlüğü (size)</label>
-                    <input type="text" id="image_size" placeholder="1K">
-                </div>
+                <div><label>Sohbet & Kodlama Modeli</label><input type="text" id="chat_model" placeholder="gemini-4-hydrogen"></div>
+                <div><label>Görsel & Texture Modeli</label><input type="text" id="image_model" placeholder="seedream-v5-5"></div>
+                <div><label>Görsel Çözünürlüğü (size)</label><input type="text" id="image_size" placeholder="1K"></div>
             </div>
 
             <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
                 <button class="btn" onclick="saveAll()">💾 Tüm Ayarları Kaydet</button>
-                <button class="btn btn-outline" onclick="testChatAPI()">🧪 Chat Modelini Test Et (gemini-4-hydrogen)</button>
-                <button class="btn btn-outline" onclick="checkBalance()">💰 Bakiye & Hız Limiti Sorgula</button>
-                <button class="btn btn-outline" onclick="fetchVeniceModels()">🔄 Tüm Venice Modellerini Listele</button>
+                <button class="btn btn-outline" onclick="testChatAPI()">🧪 Chat Modelini Test Et</button>
+                <button class="btn btn-outline" onclick="checkBalance()">💰 Bakiye & Hız Limiti</button>
+                <button class="btn btn-outline" onclick="fetchVeniceModels()">🔄 Modelleri Listele</button>
             </div>
             <div id="api-result" style="margin-top:16px; font-family:monospace; font-size:12px; color:var(--warning); white-space:pre-wrap; background:var(--bg); padding:12px; border-radius:8px; display:none;"></div>
         </div>
     </div>
 
-    <!-- TAB 2: ŞABLONLAR & SYSTEM PROMPT -->
     <div id="tab-prompts" class="tab-content">
         <div class="card">
             <h3>📋 Roblox Studio Eklentisi Açılır Menü Şablonları</h3>
@@ -214,10 +187,9 @@ async def admin_dashboard():
         </div>
     </div>
 
-    <!-- TAB 3: CANLI STREAM & LOGLAR -->
     <div id="tab-live" class="tab-content">
         <div class="card">
-            <h3>⚡ Canlı AI Üretim Akışı (Gerçek Zamanlı) <button class="btn btn-outline" onclick="loadLogs()">🔄 Yenile</button></h3>
+            <h3>⚡ Canlı AI Üretim Akışı <button class="btn btn-outline" onclick="loadLogs()">🔄 Yenile</button></h3>
             <div id="live-stream-box" class="log-item" style="border-left-color:var(--success); min-height:80px;">Bekleniyor...</div>
         </div>
         <div class="card">
@@ -226,10 +198,9 @@ async def admin_dashboard():
         </div>
     </div>
 
-    <!-- TAB 4: HATA KAYITLARI -->
     <div id="tab-errors" class="tab-content">
         <div class="card">
-            <h3 style="color:var(--danger);">⚠️ Studio ve Sunucu Hata Kayıtları (Debug) 
+            <h3 style="color:var(--danger);">⚠️ Studio ve Sunucu Hata Kayıtları 
                 <div>
                     <button class="btn btn-outline" onclick="loadErrors()">🔄 Yenile</button>
                     <button class="btn btn-danger" onclick="clearErrors()">🗑️ Temizle</button>
@@ -239,21 +210,19 @@ async def admin_dashboard():
         </div>
     </div>
 
-    <!-- TAB 5: SEEDREAM GÖRSEL TESTİ -->
     <div id="tab-texture" class="tab-content">
         <div class="card">
-            <h3>🎨 Venice.ai (/images/generations — seedream-v5-5) Test Stüdyosu</h3>
+            <h3>🎨 Venice.ai Görsel Test Stüdyosu</h3>
             <label>Görsel / Texture Promptu</label>
             <input type="text" id="tex_prompt" value="A photorealistic astronaut riding a horse on Mars">
-            <button class="btn" onclick="testTexture()">✨ Görsel Üret (b64_json)</button>
+            <button class="btn" onclick="testTexture()">✨ Görsel Üret</button>
             <div id="tex-output" style="margin-top:20px; text-align:center;"></div>
         </div>
     </div>
 
-    <!-- TAB 6: WEB & TOOLBOX ARAMA -->
     <div id="tab-tools" class="tab-content">
         <div class="card">
-            <h3>🔍 Web Arama & Roblox Toolbox Testi</h3>
+            <h3>🔍 Web & Roblox Toolbox Arama Testi</h3>
             <div class="grid-2">
                 <div>
                     <label>Roblox Toolbox Model Arama</label>
@@ -281,53 +250,83 @@ function switchTab(tabId, btn) {
     document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
     document.getElementById('tab-' + tabId).classList.add('active');
     btn.classList.add('active');
-    if(tabId === 'live') loadLogs();
-    if(tabId === 'errors') loadErrors();
+    if (tabId === 'live') loadLogs();
+    if (tabId === 'errors') loadErrors();
 }
 
 function showToast(msg) {
     const t = document.getElementById('toast');
-    t.innerText = msg; t.style.display = 'block';
+    t.innerText = msg;
+    t.style.display = 'block';
     setTimeout(() => t.style.display = 'none', 3000);
 }
 
 async function loadData() {
-    const res = await fetch('/api/admin/full-config');
-    const cfg = await res.json();
-    document.getElementById('api_key').value = cfg.api_key || '';
-    document.getElementById('base_url').value = cfg.base_url || '[https://api.venice.ai/api/v1](https://api.venice.ai/api/v1)';
-    document.getElementById('max_input_length').value = cfg.max_input_length || 80000;
-    document.getElementById('chat_model').value = cfg.chat_model || 'gemini-4-hydrogen';
-    document.getElementById('image_model').value = cfg.image_model || 'seedream-v5-5';
-    document.getElementById('image_size').value = cfg.image_size || '1K';
-    document.getElementById('system_prompt').value = cfg.system_prompt || '';
-    
-    document.getElementById('stat-chat').innerText = cfg.chat_model || 'gemini-4-hydrogen';
-    document.getElementById('stat-img').innerText = cfg.image_model || 'seedream-v5-5';
-    document.getElementById('stat-counts').innerText = `${cfg.req_count || 0} İstek / ${cfg.err_count || 0} Hata`;
-    
-    currentPresets = cfg.presets || [];
-    renderPresets();
+    try {
+        const res = await fetch('/api/admin/full-config');
+        const cfg = await res.json();
+        document.getElementById('api_key').value = cfg.api_key || '';
+        document.getElementById('base_url').value = cfg.base_url || 'https://api.venice.ai/api/v1';
+        document.getElementById('max_input_length').value = cfg.max_input_length || 80000;
+        document.getElementById('chat_model').value = cfg.chat_model || 'gemini-4-hydrogen';
+        document.getElementById('image_model').value = cfg.image_model || 'seedream-v5-5';
+        document.getElementById('image_size').value = cfg.image_size || '1K';
+        document.getElementById('system_prompt').value = cfg.system_prompt || '';
+        
+        document.getElementById('stat-chat').innerText = cfg.chat_model || 'gemini-4-hydrogen';
+        document.getElementById('stat-img').innerText = cfg.image_model || 'seedream-v5-5';
+        document.getElementById('stat-counts').innerText = (cfg.req_count || 0) + ' İstek / ' + (cfg.err_count || 0) + ' Hata';
+        
+        currentPresets = cfg.presets || [];
+        renderPresets();
+    } catch (e) {
+        console.error('Ayarlar yüklenemedi:', e);
+    }
 }
 
 function renderPresets() {
     const container = document.getElementById('presets-container');
     container.innerHTML = '';
     currentPresets.forEach((p, idx) => {
-        container.innerHTML += `
-            <div class="preset-row">
-                <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-                    <strong>Şablon #${idx + 1}</strong>
-                    <button class="btn btn-danger" onclick="removePreset(${idx})">Sil</button>
-                </div>
-                <input type="text" value="${p.title.replace(/"/g, '&quot;')}" onchange="currentPresets[${idx}].title = this.value">
-                <textarea rows="2" onchange="currentPresets[${idx}].prompt = this.value">${p.prompt}</textarea>
-            </div>`;
+        const row = document.createElement('div');
+        row.className = 'preset-row';
+        
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex; justify-content:space-between; margin-bottom:8px;';
+        header.innerHTML = '<strong>Şablon #' + (idx + 1) + '</strong>';
+        
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-danger';
+        delBtn.innerText = 'Sil';
+        delBtn.onclick = () => removePreset(idx);
+        header.appendChild(delBtn);
+        
+        const titleInput = document.createElement('input');
+        titleInput.type = 'text';
+        titleInput.value = p.title || '';
+        titleInput.onchange = (e) => { currentPresets[idx].title = e.target.value; };
+        
+        const promptArea = document.createElement('textarea');
+        promptArea.rows = 2;
+        promptArea.value = p.prompt || '';
+        promptArea.onchange = (e) => { currentPresets[idx].prompt = e.target.value; };
+        
+        row.appendChild(header);
+        row.appendChild(titleInput);
+        row.appendChild(promptArea);
+        container.appendChild(row);
     });
 }
 
-function addPresetRow() { currentPresets.push({title: "Yeni Görev Şablonu", prompt: ""}); renderPresets(); }
-function removePreset(idx) { currentPresets.splice(idx, 1); renderPresets(); }
+function addPresetRow() {
+    currentPresets.push({ title: 'Yeni Görev Şablonu', prompt: '' });
+    renderPresets();
+}
+
+function removePreset(idx) {
+    currentPresets.splice(idx, 1);
+    renderPresets();
+}
 
 async function saveAll() {
     const payload = {
@@ -340,97 +339,121 @@ async function saveAll() {
         system_prompt: document.getElementById('system_prompt').value,
         presets: currentPresets
     };
-    const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-    if(res.ok) { showToast('✅ Kaydedildi! Studio eklentisi otomatik güncellenecek.'); loadData(); }
+    const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+        showToast('✅ Kaydedildi! Studio eklentisi otomatik güncellenecek.');
+        loadData();
+    }
 }
 
 async function testChatAPI() {
     const out = document.getElementById('api-result');
-    out.style.display = 'block'; out.innerText = '⏳ Sohbet modeli test ediliyor...';
-    const res = await fetch('/api/admin/test-chat', {method: 'POST'});
+    out.style.display = 'block';
+    out.innerText = '⏳ Sohbet modeli test ediliyor...';
+    const res = await fetch('/api/admin/test-chat', { method: 'POST' });
     const data = await res.json();
     out.innerText = JSON.stringify(data, null, 2);
 }
 
 async function checkBalance() {
     const out = document.getElementById('api-result');
-    out.style.display = 'block'; out.innerText = '⏳ Sorgulanıyor...';
+    out.style.display = 'block';
+    out.innerText = '⏳ Sorgulanıyor...';
     const res = await fetch('/api/admin/balance');
     out.innerText = JSON.stringify(await res.json(), null, 2);
 }
 
 async function fetchVeniceModels() {
     const out = document.getElementById('api-result');
-    out.style.display = 'block'; out.innerText = '⏳ Modeller çekiliyor...';
+    out.style.display = 'block';
+    out.innerText = '⏳ Modeller çekiliyor...';
     const res = await fetch('/api/admin/models');
     out.innerText = JSON.stringify(await res.json(), null, 2);
 }
 
 async function testTexture() {
     const out = document.getElementById('tex-output');
-    out.innerHTML = '⏳ seedream-v5-5 ile görsel üretiliyor...';
+    out.innerHTML = '⏳ Görsel üretiliyor...';
     const res = await fetch('/api/image/generate', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({prompt: document.getElementById('tex_prompt').value})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: document.getElementById('tex_prompt').value })
     });
     const data = await res.json();
-    if(data.b64_image) {
-        out.innerHTML = `<img src="data:image/png;base64,${data.b64_image}" style="max-width:480px; border-radius:10px; border:1px solid var(--border);">`;
+    if (data.b64_image) {
+        out.innerHTML = '<img src="data:image/png;base64,' + data.b64_image + '" style="max-width:480px; border-radius:10px; border:1px solid var(--border);">';
     } else {
-        out.innerHTML = `<pre style="text-align:left; color:var(--danger);">${JSON.stringify(data, null, 2)}</pre>`;
+        out.innerHTML = '<pre style="text-align:left; color:var(--danger);">' + JSON.stringify(data, null, 2) + '</pre>';
     }
 }
 
 async function loadLogs() {
     const res = await fetch('/api/admin/logs');
     const data = await res.json();
-    document.getElementById('live-stream-box').innerText = `Durum: ${data.live.status} (${data.live.updated_at})\n\n${data.live.buffer || 'Henüz aktif akış yok.'}`;
+    document.getElementById('live-stream-box').innerText = 'Durum: ' + data.live.status + ' (' + data.live.updated_at + ')\n\n' + (data.live.buffer || 'Henüz aktif akış yok.');
     const container = document.getElementById('logs-container');
-    container.innerHTML = data.logs.length ? data.logs.map(l => `
-        <div class="log-item">
-            <div style="color:var(--accent); font-weight:bold; margin-bottom:6px;">🕒 ${l.time} | Seçili Nesne: ${l.selected_count} | Aksiyon Sayısı: ${l.action_count}</div>
-            <div><strong>Kullanıcı Komutu:</strong> ${l.prompt}</div>
-            <div style="margin-top:6px; color:#a7f3d0;"><strong>AI Planı:</strong> ${l.thought}</div>
-        </div>`).join('') : 'Kayıt yok.';
+    container.innerHTML = '';
+    if (!data.logs.length) {
+        container.innerText = 'Kayıt yok.';
+        return;
+    }
+    data.logs.forEach(l => {
+        const div = document.createElement('div');
+        div.className = 'log-item';
+        div.innerText = '🕒 ' + l.time + ' | Seçili Nesne: ' + l.selected_count + ' | Aksiyon: ' + l.action_count + '\nKomut: ' + l.prompt + '\nAI Planı: ' + l.thought;
+        container.appendChild(div);
+    });
 }
 
 async function loadErrors() {
     const res = await fetch('/api/admin/errors');
     const errs = await res.json();
-    document.getElementById('errors-container').innerHTML = errs.length ? errs.map(e => `
-        <div class="log-item error-item">
-            <strong>[${e.time}] ❌ ${e.type}</strong>\n${e.details}\n${e.raw ? '\n--- HAM ÇIKTI ---\n' + e.raw : ''}
-        </div>`).join('') : 'Hiçbir hata kaydı yok.';
+    const container = document.getElementById('errors-container');
+    container.innerHTML = '';
+    if (!errs.length) {
+        container.innerText = 'Hiçbir hata kaydı yok.';
+        return;
+    }
+    errs.forEach(e => {
+        const div = document.createElement('div');
+        div.className = 'log-item error-item';
+        div.innerText = '[' + e.time + '] ❌ ' + e.type + '\n' + e.details + (e.raw ? '\n--- HAM ÇIKTI ---\n' + e.raw : '');
+        container.appendChild(div);
+    });
 }
 
 async function clearErrors() {
-    await fetch('/api/admin/clear-errors', {method: 'POST'});
+    await fetch('/api/admin/clear-errors', { method: 'POST' });
     loadErrors();
 }
 
 async function testToolbox() {
     const out = document.getElementById('tools-output');
-    out.style.display = 'block'; out.innerText = 'Aranıyor...';
+    out.style.display = 'block';
+    out.innerText = 'Aranıyor...';
     const res = await fetch('/api/toolbox/search?q=' + encodeURIComponent(document.getElementById('tb_query').value));
     out.innerText = JSON.stringify(await res.json(), null, 2);
 }
 
 async function testWebSearch() {
     const out = document.getElementById('tools-output');
-    out.style.display = 'block'; out.innerText = 'Web taranıyor...';
+    out.style.display = 'block';
+    out.innerText = 'Web taranıyor...';
     const res = await fetch('/api/search?q=' + encodeURIComponent(document.getElementById('web_query').value));
     out.innerText = JSON.stringify(await res.json(), null, 2);
 }
 
 loadData();
 setInterval(() => {
-    if(document.getElementById('tab-live').classList.contains('active')) loadLogs();
-}, 3000);
+    if (document.getElementById('tab-live').classList.contains('active')) loadLogs();
+}, 2500);
 </script>
 </body>
-</html>
-    """
+</html>"""
 
 @app.get("/api/admin/full-config")
 async def full_config():
@@ -515,7 +538,7 @@ async def web_search(q: str):
 
 @app.get("/api/toolbox/search")
 async def search_toolbox(q: str):
-    url = f"[https://apis.roblox.com/toolbox-service/v1/marketplace/10?keyword=](https://apis.roblox.com/toolbox-service/v1/marketplace/10?keyword=){q}&limit=5"
+    url = f"https://apis.roblox.com/toolbox-service/v1/marketplace/10?keyword={q}&limit=5"
     async with httpx.AsyncClient() as client:
         r = await client.get(url, timeout=15.0)
         if r.status_code == 200:
@@ -525,10 +548,6 @@ async def search_toolbox(q: str):
 
 @app.post("/api/image/generate")
 async def generate_image(request: Request):
-    """
-    Paylaştığınız resmi Venice.ai /api/v1/images/generations uç noktası:
-    {"model":"seedream-v5-5","prompt":"...","size":"1K","response_format":"b64_json"}
-    """
     body = await request.json()
     cfg = get_config()
     headers = {"Authorization": f"Bearer {cfg.get('api_key')}", "Content-Type": "application/json"}
@@ -553,17 +572,12 @@ async def generate_image(request: Request):
 
 @app.post("/api/agent/execute")
 async def agent_execute(request: Request):
-    """
-    Venice.ai /chat/completions uç noktasına stream=True ile bağlanır,
-    canlı akışı web panelinde gösterir, yanıt tamamlandığında JSON'u onarıp
-    Roblox Studio'ya %100 geçerli JSON olarak teslim eder.
-    """
     body = await request.json()
     cfg = get_config()
     
     if not cfg.get("api_key"):
         add_error_log("API Anahtarı Eksik", "Sunucu panelinden Venice.ai API anahtarınızı girmediniz.")
-        return JSONResponse({"error": "API Anahtarı eksik! [https://robloxai-1ea7.onrender.com](https://robloxai-1ea7.onrender.com) adresinden API anahtarınızı kaydedin."}, status_code=400)
+        return JSONResponse({"error": "API Anahtarı eksik! https://robloxai-1ea7.onrender.com adresinden API anahtarınızı kaydedin."}, status_code=400)
 
     user_prompt = body.get("prompt", "")
     scene_context = body.get("scene_context", [])
@@ -599,8 +613,9 @@ async def agent_execute(request: Request):
         ]
     }
 
-    LIVE_STREAM_STATE["status"] = "Üretiliyor..."
+    LIVE_STREAM_STATE["status"] = "Yapay Zeka Yazıyor..."
     LIVE_STREAM_STATE["buffer"] = ""
+    LIVE_STREAM_STATE["active"] = True
     LIVE_STREAM_STATE["updated_at"] = time.strftime("%H:%M:%S")
 
     collected_chunks = []
@@ -612,6 +627,7 @@ async def agent_execute(request: Request):
                     err_body = (await response.aread()).decode("utf-8", errors="ignore")
                     add_error_log(f"Venice API HTTP {response.status_code}", err_body)
                     LIVE_STREAM_STATE["status"] = f"Hata ({response.status_code})"
+                    LIVE_STREAM_STATE["active"] = False
                     return JSONResponse({"error": f"Venice API Hatası ({response.status_code}): {err_body}"}, status_code=400)
 
                 async for line in response.aiter_lines():
@@ -626,22 +642,22 @@ async def agent_execute(request: Request):
                         content_piece = delta.get("content") or ""
                         if content_piece:
                             collected_chunks.append(content_piece)
-                            LIVE_STREAM_STATE["buffer"] = "".join(collected_chunks)[-2500:]
+                            LIVE_STREAM_STATE["buffer"] = "".join(collected_chunks)[-3000:]
                             LIVE_STREAM_STATE["updated_at"] = time.strftime("%H:%M:%S")
                     except Exception:
                         continue
     except Exception as e:
         add_error_log("Stream Bağlantı Hatası", str(e))
         LIVE_STREAM_STATE["status"] = "Bağlantı Kesildi"
+        LIVE_STREAM_STATE["active"] = False
         return JSONResponse({"error": f"Sunucu Stream Hatası: {str(e)}"}, status_code=500)
 
     raw_full_output = "".join(collected_chunks)
     LIVE_STREAM_STATE["status"] = "Tamamlandı"
+    LIVE_STREAM_STATE["active"] = False
 
     try:
         repaired_dict = extract_and_repair_json(raw_full_output)
-        
-        # Eğer fallback_code döndüyse ve seçili bir script varsa otomatik olarak o scripti güncelle!
         actions = repaired_dict.get("actions", [])
         if len(actions) == 1 and actions[0].get("type") == "fallback_code":
             code_str = actions[0].get("source", "")
