@@ -1,15 +1,18 @@
 import os
+import re
 import json
 import time
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from duckduckgo_search import DDGS
 
 app = FastAPI()
 CONFIG_FILE = "config.json"
-RECENT_LOGS = []
+
+REQUEST_LOGS = []
 ERROR_LOGS = []
+LIVE_STREAM_STATE = {"status": "Boşta", "buffer": "", "updated_at": ""}
 
 def get_config():
     if os.path.exists(CONFIG_FILE):
@@ -26,6 +29,73 @@ def save_config(new_data: dict):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(current, f, indent=2, ensure_ascii=False)
 
+def add_error_log(err_type: str, details: str, raw_output: str = ""):
+    ERROR_LOGS.append({
+        "time": time.strftime("%H:%M:%S"),
+        "type": err_type,
+        "details": details,
+        "raw": raw_output[:4000]
+    })
+
+def extract_and_repair_json(raw_text: str) -> dict:
+    """
+    Yapay zekadan dönen metindeki <think> bloklarını, markdown işaretlerini ve
+    bozuk satır sonu karakterlerini temizleyip %100 geçerli bir Python dict döndürür.
+    JSON çıkarılamazsa ama içinde Luau kodu varsa otomatik aksiyona dönüştürür.
+    """
+    if not raw_text or not raw_text.strip():
+        raise ValueError("Yapay zeka boş yanıt döndürdü (API anahtarınızı veya model adını kontrol edin).")
+
+    # 1. <think>...</think> bloklarını kaldır
+    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+
+    # 2. ```json ... ``` bloğu varsa içini al
+    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", cleaned, flags=re.DOTALL)
+    if fenced:
+        candidate = fenced.group(1).strip()
+    else:
+        # İlk '{' ile son '}' arasını al
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = cleaned[start:end + 1]
+        else:
+            candidate = cleaned
+
+    # 3. strict=False ile ayrıştırmayı dene (string içindeki ham \n ve \t karakterlerini kabul eder)
+    try:
+        parsed = json.loads(candidate, strict=False)
+        if isinstance(parsed, dict):
+            if "actions" not in parsed:
+                parsed["actions"] = []
+            if "thought" not in parsed:
+                parsed["thought"] = "İşlem planlandı."
+            return parsed
+    except Exception:
+        pass
+
+    # 4. Sonda kalan fazladan virgülleri (trailing commas) temizleyip tekrar dene
+    try:
+        fixed_commas = re.sub(r",\s*([\]}])", r"\1", candidate)
+        parsed = json.loads(fixed_commas, strict=False)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    # 5. Eğer model direkt Luau kodu döndürdüyse (JSON unuttuysa), otomatik olarak aksiyona sar!
+    lua_match = re.search(r"```(?:lua|luau)?\s*(.*?)\s*```", cleaned, flags=re.DOTALL)
+    code_content = lua_match.group(1) if lua_match else cleaned
+    return {
+        "thought": "Model doğrudan Luau kodu üretti, otomatik olarak script/komut aksiyonuna dönüştürüldü.",
+        "actions": [
+            {
+                "type": "fallback_code",
+                "source": code_content
+            }
+        ]
+    }
+
 @app.get("/", response_class=HTMLResponse)
 async def admin_dashboard():
     return """
@@ -33,177 +103,572 @@ async def admin_dashboard():
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <title>AI Studio Evrensel Admin Paneli</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roblox AI Architect Ultimate — Kontrol Merkezi</title>
     <style>
-        :root { --bg: #0b0d13; --sidebar: #11141d; --card: #161a24; --border: #252b3b; --accent: #3b82f6; --danger: #ef4444; --text: #f1f5f9; --muted: #94a3b8; }
-        body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; margin: 0; }
-        .sidebar { width: 250px; background: var(--sidebar); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; gap: 8px; }
-        .nav-btn { background: transparent; border: none; color: var(--muted); padding: 12px; text-align: left; border-radius: 8px; cursor: pointer; font-weight: 600; }
-        .nav-btn.active { background: var(--card); color: #fff; border-left: 3px solid var(--accent); }
-        .main { flex: 1; padding: 30px; max-width: 1200px; }
+        :root {
+            --bg: #090b10; --sidebar: #10131c; --card: #151925; --border: #23293a;
+            --accent: #3b82f6; --accent-hover: #2563eb; --success: #10b981;
+            --danger: #ef4444; --warning: #f59e0b; --text: #f1f5f9; --muted: #94a3b8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+        .sidebar { width: 265px; background: var(--sidebar); border-right: 1px solid var(--border); padding: 22px 14px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; height: 100vh; }
+        .brand { font-size: 17px; font-weight: 800; color: #fff; padding: 0 12px 18px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+        .nav-btn { background: transparent; border: none; color: var(--muted); padding: 12px 14px; text-align: left; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.15s; }
+        .nav-btn:hover, .nav-btn.active { background: var(--card); color: #fff; border-left: 3px solid var(--accent); }
+        .main { flex: 1; padding: 28px 34px; max-width: 1250px; overflow-y: auto; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 20px; }
-        input, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-family: monospace; box-sizing: border-box; }
-        .btn { background: var(--accent); color: #fff; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; }
-        .log-item { background: var(--bg); border-left: 3px solid var(--accent); padding: 10px; margin-bottom: 8px; font-family: monospace; font-size: 12px; }
-        .error-item { border-left-color: var(--danger); color: #fca5a5; }
+        .top-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 24px; }
+        .stat-box { background: var(--card); border: 1px solid var(--border); padding: 16px; border-radius: 10px; }
+        .stat-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-val { font-size: 16px; font-weight: 700; margin-top: 6px; color: #fff; word-break: break-all; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; margin-bottom: 22px; }
+        .card h3 { font-size: 15px; margin-bottom: 16px; color: #fff; border-bottom: 1px solid var(--border); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+        label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+        input, textarea, select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 10px 13px; border-radius: 8px; margin-bottom: 14px; font-size: 13px; font-family: monospace; }
+        input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+        .btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px; transition: 0.15s; }
+        .btn:hover { background: var(--accent-hover); }
+        .btn-danger { background: var(--danger); padding: 6px 12px; font-size: 12px; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+        .btn-outline:hover { background: var(--border); }
+        .preset-row { background: var(--bg); border: 1px solid var(--border); padding: 14px; border-radius: 8px; margin-bottom: 12px; }
+        .log-item { background: var(--bg); border-left: 3px solid var(--accent); padding: 14px; border-radius: 6px; margin-bottom: 12px; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+        .error-item { border-left-color: var(--danger); background: #1a0f14; color: #fecdd3; }
+        #toast { position: fixed; bottom: 24px; right: 24px; background: var(--success); color: #fff; padding: 14px 22px; border-radius: 8px; font-weight: 600; display: none; z-index: 9999; box-shadow: 0 8px 25px rgba(0,0,0,0.6); }
     </style>
 </head>
 <body>
 <div class="sidebar">
-    <h3 style="color:#fff; margin-top:0;">⚡ AI Studio</h3>
-    <button class="nav-btn active" onclick="switchTab('settings', this)">⚙️ Ayarlar & Modeller</button>
-    <button class="nav-btn" onclick="switchTab('logs', this)">📡 İstek Logları</button>
-    <button class="nav-btn" onclick="switchTab('errors', this)">⚠️ Studio Hata Kayıtları</button>
+    <div class="brand">⚡ AI Studio Ultimate</div>
+    <button class="nav-btn active" onclick="switchTab('models', this)">🔑 API & Modeller</button>
+    <button class="nav-btn" onclick="switchTab('prompts', this)">📋 Şablonlar & System Prompt</button>
+    <button class="nav-btn" onclick="switchTab('live', this)">📡 Canlı Stream & İstek Logları</button>
+    <button class="nav-btn" onclick="switchTab('errors', this)">⚠️ Hata & Debug Kayıtları</button>
+    <button class="nav-btn" onclick="switchTab('texture', this)">🎨 Seedream Görsel Testi</button>
+    <button class="nav-btn" onclick="switchTab('tools', this)">🔍 Web & Toolbox Arama Testi</button>
 </div>
+
 <div class="main">
-    <div id="tab-settings" class="tab-content active">
+    <div class="top-stats">
+        <div class="stat-box"><div class="stat-title">Sunucu Adresi</div><div class="stat-val" style="color:var(--success);">robloxai-1ea7.onrender.com</div></div>
+        <div class="stat-box"><div class="stat-title">Aktif Sohbet Modeli</div><div class="stat-val" id="stat-chat">gemini-4-hydrogen</div></div>
+        <div class="stat-box"><div class="stat-title">Aktif Görsel Modeli</div><div class="stat-val" id="stat-img">seedream-v5-5</div></div>
+        <div class="stat-box"><div class="stat-title">Toplam İstek / Hata</div><div class="stat-val" id="stat-counts">0 / 0</div></div>
+    </div>
+
+    <!-- TAB 1: API & MODELLER -->
+    <div id="tab-models" class="tab-content active">
         <div class="card">
-            <h3>API ve Sistem Yapılandırması</h3>
-            <label>Venice.ai / OpenAI API Anahtarı</label>
-            <input type="password" id="api_key">
-            <label>API Base URL</label>
-            <input type="text" id="base_url" value="https://api.venice.ai/api/v1">
-            <div style="display:flex; gap:10px;">
-                <div style="flex:1;"><label>Dil Modeli</label><input type="text" id="chat_model"></div>
-                <div style="flex:1;"><label>Görsel Modeli</label><input type="text" id="image_model"></div>
+            <h3>🔑 Venice.ai API & Model Yapılandırması</h3>
+            <label>Venice.ai API Anahtarı (Bearer Token)</label>
+            <input type="password" id="api_key" placeholder="Venice.ai API anahtarınızı buraya yapıştırın...">
+            
+            <div class="grid-2">
+                <div><label>API Base URL</label><input type="text" id="base_url" value="[https://api.venice.ai/api/v1](https://api.venice.ai/api/v1)"></div>
+                <div><label>Maksimum Girdi Karakter Sınırı</label><input type="number" id="max_input_length" value="80000"></div>
             </div>
-            <label>Evrensel Sistem Talimatı (System Prompt)</label>
-            <textarea id="system_prompt" rows="8"></textarea>
-            <button class="btn" onclick="saveSettings()">💾 Ayarları Kaydet</button>
+
+            <div class="grid-3">
+                <div>
+                    <label>Sohbet & Kodlama Modeli (/chat/completions)</label>
+                    <input type="text" id="chat_model" placeholder="gemini-4-hydrogen">
+                </div>
+                <div>
+                    <label>Görsel & Texture Modeli (/images/generations)</label>
+                    <input type="text" id="image_model" placeholder="seedream-v5-5">
+                </div>
+                <div>
+                    <label>Görsel Çözünürlüğü (size)</label>
+                    <input type="text" id="image_size" placeholder="1K">
+                </div>
+            </div>
+
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
+                <button class="btn" onclick="saveAll()">💾 Tüm Ayarları Kaydet</button>
+                <button class="btn btn-outline" onclick="testChatAPI()">🧪 Chat Modelini Test Et (gemini-4-hydrogen)</button>
+                <button class="btn btn-outline" onclick="checkBalance()">💰 Bakiye & Hız Limiti Sorgula</button>
+                <button class="btn btn-outline" onclick="fetchVeniceModels()">🔄 Tüm Venice Modellerini Listele</button>
+            </div>
+            <div id="api-result" style="margin-top:16px; font-family:monospace; font-size:12px; color:var(--warning); white-space:pre-wrap; background:var(--bg); padding:12px; border-radius:8px; display:none;"></div>
         </div>
     </div>
-    <div id="tab-logs" class="tab-content">
+
+    <!-- TAB 2: ŞABLONLAR & SYSTEM PROMPT -->
+    <div id="tab-prompts" class="tab-content">
         <div class="card">
-            <h3>Son İstekler <button class="btn" style="float:right; padding:5px 10px;" onclick="loadLogs()">Yenile</button></h3>
-            <div id="logs-container"></div>
+            <h3>📋 Roblox Studio Eklentisi Açılır Menü Şablonları</h3>
+            <div id="presets-container"></div>
+            <button class="btn btn-outline" onclick="addPresetRow()">➕ Yeni Görev Şablonu Ekle</button>
+            <button class="btn" onclick="saveAll()" style="margin-left:8px;">💾 Şablonları Kaydet</button>
+        </div>
+
+        <div class="card">
+            <h3>🧠 Evrensel Sistem Talimatı (System Prompt)</h3>
+            <textarea id="system_prompt" rows="14"></textarea>
+            <button class="btn" onclick="saveAll()">💾 Sistem Talimatını Kaydet</button>
         </div>
     </div>
+
+    <!-- TAB 3: CANLI STREAM & LOGLAR -->
+    <div id="tab-live" class="tab-content">
+        <div class="card">
+            <h3>⚡ Canlı AI Üretim Akışı (Gerçek Zamanlı) <button class="btn btn-outline" onclick="loadLogs()">🔄 Yenile</button></h3>
+            <div id="live-stream-box" class="log-item" style="border-left-color:var(--success); min-height:80px;">Bekleniyor...</div>
+        </div>
+        <div class="card">
+            <h3>📡 Studio'dan Gelen Tüm İstekler ve AI Yanıtları</h3>
+            <div id="logs-container">Henüz işlem yapılmadı.</div>
+        </div>
+    </div>
+
+    <!-- TAB 4: HATA KAYITLARI -->
     <div id="tab-errors" class="tab-content">
         <div class="card">
-            <h3 style="color:var(--danger);">Studio Hata Bildirimleri <button class="btn" style="float:right; padding:5px 10px;" onclick="loadErrors()">Yenile</button></h3>
-            <div id="errors-container"></div>
+            <h3 style="color:var(--danger);">⚠️ Studio ve Sunucu Hata Kayıtları (Debug) 
+                <div>
+                    <button class="btn btn-outline" onclick="loadErrors()">🔄 Yenile</button>
+                    <button class="btn btn-danger" onclick="clearErrors()">🗑️ Temizle</button>
+                </div>
+            </h3>
+            <div id="errors-container">Hiçbir hata kaydı yok.</div>
+        </div>
+    </div>
+
+    <!-- TAB 5: SEEDREAM GÖRSEL TESTİ -->
+    <div id="tab-texture" class="tab-content">
+        <div class="card">
+            <h3>🎨 Venice.ai (/images/generations — seedream-v5-5) Test Stüdyosu</h3>
+            <label>Görsel / Texture Promptu</label>
+            <input type="text" id="tex_prompt" value="A photorealistic astronaut riding a horse on Mars">
+            <button class="btn" onclick="testTexture()">✨ Görsel Üret (b64_json)</button>
+            <div id="tex-output" style="margin-top:20px; text-align:center;"></div>
+        </div>
+    </div>
+
+    <!-- TAB 6: WEB & TOOLBOX ARAMA -->
+    <div id="tab-tools" class="tab-content">
+        <div class="card">
+            <h3>🔍 Web Arama & Roblox Toolbox Testi</h3>
+            <div class="grid-2">
+                <div>
+                    <label>Roblox Toolbox Model Arama</label>
+                    <input type="text" id="tb_query" value="medieval sword">
+                    <button class="btn btn-outline" onclick="testToolbox()">📦 Toolbox'ta Ara</button>
+                </div>
+                <div>
+                    <label>Web Dokümantasyon Arama</label>
+                    <input type="text" id="web_query" value="Roblox Luau TweenService example">
+                    <button class="btn btn-outline" onclick="testWebSearch()">🌐 Web'de Ara</button>
+                </div>
+            </div>
+            <div id="tools-output" class="log-item" style="margin-top:16px; display:none;"></div>
         </div>
     </div>
 </div>
+
+<div id="toast">✅ Ayarlar Kaydedildi!</div>
+
 <script>
-function switchTab(id, btn) {
-    document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(e => e.classList.remove('active'));
-    document.getElementById('tab-' + id).classList.add('active');
+let currentPresets = [];
+
+function switchTab(tabId, btn) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + tabId).classList.add('active');
     btn.classList.add('active');
-    if(id==='logs') loadLogs();
-    if(id==='errors') loadErrors();
+    if(tabId === 'live') loadLogs();
+    if(tabId === 'errors') loadErrors();
 }
+
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.innerText = msg; t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 3000);
+}
+
 async function loadData() {
-    const res = await fetch('/api/admin/config');
+    const res = await fetch('/api/admin/full-config');
     const cfg = await res.json();
     document.getElementById('api_key').value = cfg.api_key || '';
-    document.getElementById('base_url').value = cfg.base_url || 'https://api.venice.ai/api/v1';
-    document.getElementById('chat_model').value = cfg.chat_model || '';
-    document.getElementById('image_model').value = cfg.image_model || '';
+    document.getElementById('base_url').value = cfg.base_url || '[https://api.venice.ai/api/v1](https://api.venice.ai/api/v1)';
+    document.getElementById('max_input_length').value = cfg.max_input_length || 80000;
+    document.getElementById('chat_model').value = cfg.chat_model || 'gemini-4-hydrogen';
+    document.getElementById('image_model').value = cfg.image_model || 'seedream-v5-5';
+    document.getElementById('image_size').value = cfg.image_size || '1K';
     document.getElementById('system_prompt').value = cfg.system_prompt || '';
+    
+    document.getElementById('stat-chat').innerText = cfg.chat_model || 'gemini-4-hydrogen';
+    document.getElementById('stat-img').innerText = cfg.image_model || 'seedream-v5-5';
+    document.getElementById('stat-counts').innerText = `${cfg.req_count || 0} İstek / ${cfg.err_count || 0} Hata`;
+    
+    currentPresets = cfg.presets || [];
+    renderPresets();
 }
-async function saveSettings() {
+
+function renderPresets() {
+    const container = document.getElementById('presets-container');
+    container.innerHTML = '';
+    currentPresets.forEach((p, idx) => {
+        container.innerHTML += `
+            <div class="preset-row">
+                <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                    <strong>Şablon #${idx + 1}</strong>
+                    <button class="btn btn-danger" onclick="removePreset(${idx})">Sil</button>
+                </div>
+                <input type="text" value="${p.title.replace(/"/g, '&quot;')}" onchange="currentPresets[${idx}].title = this.value">
+                <textarea rows="2" onchange="currentPresets[${idx}].prompt = this.value">${p.prompt}</textarea>
+            </div>`;
+    });
+}
+
+function addPresetRow() { currentPresets.push({title: "Yeni Görev Şablonu", prompt: ""}); renderPresets(); }
+function removePreset(idx) { currentPresets.splice(idx, 1); renderPresets(); }
+
+async function saveAll() {
     const payload = {
-        api_key: document.getElementById('api_key').value,
-        base_url: document.getElementById('base_url').value,
-        chat_model: document.getElementById('chat_model').value,
-        image_model: document.getElementById('image_model').value,
-        system_prompt: document.getElementById('system_prompt').value
+        api_key: document.getElementById('api_key').value.trim(),
+        base_url: document.getElementById('base_url').value.trim(),
+        max_input_length: parseInt(document.getElementById('max_input_length').value) || 80000,
+        chat_model: document.getElementById('chat_model').value.trim(),
+        image_model: document.getElementById('image_model').value.trim(),
+        image_size: document.getElementById('image_size').value.trim(),
+        system_prompt: document.getElementById('system_prompt').value,
+        presets: currentPresets
     };
-    await fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-    alert('Kaydedildi!');
+    const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+    if(res.ok) { showToast('✅ Kaydedildi! Studio eklentisi otomatik güncellenecek.'); loadData(); }
 }
+
+async function testChatAPI() {
+    const out = document.getElementById('api-result');
+    out.style.display = 'block'; out.innerText = '⏳ Sohbet modeli test ediliyor...';
+    const res = await fetch('/api/admin/test-chat', {method: 'POST'});
+    const data = await res.json();
+    out.innerText = JSON.stringify(data, null, 2);
+}
+
+async function checkBalance() {
+    const out = document.getElementById('api-result');
+    out.style.display = 'block'; out.innerText = '⏳ Sorgulanıyor...';
+    const res = await fetch('/api/admin/balance');
+    out.innerText = JSON.stringify(await res.json(), null, 2);
+}
+
+async function fetchVeniceModels() {
+    const out = document.getElementById('api-result');
+    out.style.display = 'block'; out.innerText = '⏳ Modeller çekiliyor...';
+    const res = await fetch('/api/admin/models');
+    out.innerText = JSON.stringify(await res.json(), null, 2);
+}
+
+async function testTexture() {
+    const out = document.getElementById('tex-output');
+    out.innerHTML = '⏳ seedream-v5-5 ile görsel üretiliyor...';
+    const res = await fetch('/api/image/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt: document.getElementById('tex_prompt').value})
+    });
+    const data = await res.json();
+    if(data.b64_image) {
+        out.innerHTML = `<img src="data:image/png;base64,${data.b64_image}" style="max-width:480px; border-radius:10px; border:1px solid var(--border);">`;
+    } else {
+        out.innerHTML = `<pre style="text-align:left; color:var(--danger);">${JSON.stringify(data, null, 2)}</pre>`;
+    }
+}
+
 async function loadLogs() {
     const res = await fetch('/api/admin/logs');
-    const logs = await res.json();
-    document.getElementById('logs-container').innerHTML = logs.map(l => `<div class="log-item">[${l.time}] ${l.prompt}</div>`).join('');
+    const data = await res.json();
+    document.getElementById('live-stream-box').innerText = `Durum: ${data.live.status} (${data.live.updated_at})\n\n${data.live.buffer || 'Henüz aktif akış yok.'}`;
+    const container = document.getElementById('logs-container');
+    container.innerHTML = data.logs.length ? data.logs.map(l => `
+        <div class="log-item">
+            <div style="color:var(--accent); font-weight:bold; margin-bottom:6px;">🕒 ${l.time} | Seçili Nesne: ${l.selected_count} | Aksiyon Sayısı: ${l.action_count}</div>
+            <div><strong>Kullanıcı Komutu:</strong> ${l.prompt}</div>
+            <div style="margin-top:6px; color:#a7f3d0;"><strong>AI Planı:</strong> ${l.thought}</div>
+        </div>`).join('') : 'Kayıt yok.';
 }
+
 async function loadErrors() {
     const res = await fetch('/api/admin/errors');
     const errs = await res.json();
-    document.getElementById('errors-container').innerHTML = errs.map(e => `<div class="log-item error-item">[${e.time}] <b>${e.type}</b><br>${e.details}</div>`).join('');
+    document.getElementById('errors-container').innerHTML = errs.length ? errs.map(e => `
+        <div class="log-item error-item">
+            <strong>[${e.time}] ❌ ${e.type}</strong>\n${e.details}\n${e.raw ? '\n--- HAM ÇIKTI ---\n' + e.raw : ''}
+        </div>`).join('') : 'Hiçbir hata kaydı yok.';
 }
+
+async function clearErrors() {
+    await fetch('/api/admin/clear-errors', {method: 'POST'});
+    loadErrors();
+}
+
+async function testToolbox() {
+    const out = document.getElementById('tools-output');
+    out.style.display = 'block'; out.innerText = 'Aranıyor...';
+    const res = await fetch('/api/toolbox/search?q=' + encodeURIComponent(document.getElementById('tb_query').value));
+    out.innerText = JSON.stringify(await res.json(), null, 2);
+}
+
+async function testWebSearch() {
+    const out = document.getElementById('tools-output');
+    out.style.display = 'block'; out.innerText = 'Web taranıyor...';
+    const res = await fetch('/api/search?q=' + encodeURIComponent(document.getElementById('web_query').value));
+    out.innerText = JSON.stringify(await res.json(), null, 2);
+}
+
 loadData();
+setInterval(() => {
+    if(document.getElementById('tab-live').classList.contains('active')) loadLogs();
+}, 3000);
 </script>
 </body>
 </html>
     """
 
-@app.get("/api/admin/config")
-async def get_full_config():
-    return get_config()
-
-@app.get("/api/config")
-async def public_config():
+@app.get("/api/admin/full-config")
+async def full_config():
     cfg = get_config()
-    return {"chat_model": cfg.get("chat_model"), "has_key": bool(cfg.get("api_key"))}
+    cfg["req_count"] = len(REQUEST_LOGS)
+    cfg["err_count"] = len(ERROR_LOGS)
+    return cfg
 
 @app.post("/api/settings")
 async def update_settings(request: Request):
     save_config(await request.json())
     return {"status": "ok"}
 
+@app.post("/api/admin/test-chat")
+async def test_chat():
+    cfg = get_config()
+    headers = {"Authorization": f"Bearer {cfg.get('api_key')}", "Content-Type": "application/json"}
+    payload = {
+        "model": cfg.get("chat_model", "gemini-4-hydrogen"),
+        "messages": [{"role": "user", "content": "Hello! Reply with a short greeting."}]
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{cfg.get('base_url')}/chat/completions", json=payload, headers=headers, timeout=30.0)
+        return {"status_code": r.status_code, "response": r.json() if r.status_code == 200 else r.text}
+
+@app.get("/api/admin/balance")
+async def get_balance():
+    cfg = get_config()
+    headers = {"Authorization": f"Bearer {cfg.get('api_key')}"}
+    async with httpx.AsyncClient() as client:
+        r1 = await client.get(f"{cfg.get('base_url')}/billing/balance", headers=headers, timeout=15.0)
+        r2 = await client.get(f"{cfg.get('base_url')}/api_keys/rate_limits", headers=headers, timeout=15.0)
+        return {
+            "balance": r1.json() if r1.status_code == 200 else r1.text,
+            "rate_limits": r2.json() if r2.status_code == 200 else r2.text
+        }
+
+@app.get("/api/admin/models")
+async def list_models():
+    cfg = get_config()
+    headers = {"Authorization": f"Bearer {cfg.get('api_key')}"}
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{cfg.get('base_url')}/models", headers=headers, timeout=15.0)
+        return [m.get("id") for m in r.json().get("data", [])] if r.status_code == 200 else r.text
+
 @app.get("/api/admin/logs")
 async def get_logs():
-    return list(reversed(RECENT_LOGS[-30:]))
+    return {"live": LIVE_STREAM_STATE, "logs": list(reversed(REQUEST_LOGS[-30:]))}
 
 @app.get("/api/admin/errors")
 async def get_errors():
     return list(reversed(ERROR_LOGS[-30:]))
 
+@app.post("/api/admin/clear-errors")
+async def clear_errors():
+    ERROR_LOGS.clear()
+    return {"status": "cleared"}
+
 @app.post("/api/log_error")
-async def log_error(request: Request):
+async def log_studio_error(request: Request):
     data = await request.json()
-    ERROR_LOGS.append({
-        "time": time.strftime("%H:%M:%S"),
-        "type": data.get("type", "Bilinmeyen Hata"),
-        "details": data.get("details", "")
-    })
+    add_error_log(data.get("type", "Studio Hatası"), data.get("details", ""), data.get("raw", ""))
     return {"status": "logged"}
+
+@app.get("/api/config")
+async def public_config():
+    cfg = get_config()
+    return {
+        "presets": cfg.get("presets", []),
+        "chat_model": cfg.get("chat_model", "gemini-4-hydrogen"),
+        "image_model": cfg.get("image_model", "seedream-v5-5"),
+        "has_key": bool(cfg.get("api_key"))
+    }
 
 @app.get("/api/search")
 async def web_search(q: str):
     try:
-        results = DDGS().text(q, max_results=3)
+        results = DDGS().text(q, max_results=4)
         return {"results": results}
     except Exception as e:
-        return {"error": str(e)}
+        return {"results": [], "error": str(e)}
 
-@app.post("/api/agent/stream")
-async def agent_stream(request: Request):
+@app.get("/api/toolbox/search")
+async def search_toolbox(q: str):
+    url = f"[https://apis.roblox.com/toolbox-service/v1/marketplace/10?keyword=](https://apis.roblox.com/toolbox-service/v1/marketplace/10?keyword=){q}&limit=5"
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, timeout=15.0)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            return [{"id": i.get("id")} for i in data if i.get("id")]
+    return []
+
+@app.post("/api/image/generate")
+async def generate_image(request: Request):
+    """
+    Paylaştığınız resmi Venice.ai /api/v1/images/generations uç noktası:
+    {"model":"seedream-v5-5","prompt":"...","size":"1K","response_format":"b64_json"}
+    """
     body = await request.json()
     cfg = get_config()
-    user_prompt = body.get("prompt", "")
-    RECENT_LOGS.append({"time": time.strftime("%H:%M:%S"), "prompt": user_prompt[:200]})
-    
     headers = {"Authorization": f"Bearer {cfg.get('api_key')}", "Content-Type": "application/json"}
     payload = {
-        "model": cfg.get("chat_model", "zai-org-glm-5-1"),
+        "model": cfg.get("image_model", "seedream-v5-5"),
+        "prompt": body.get("prompt", ""),
+        "size": cfg.get("image_size", "1K"),
+        "response_format": "b64_json"
+    }
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{cfg.get('base_url')}/images/generations", json=payload, headers=headers, timeout=60.0)
+        if r.status_code != 200:
+            add_error_log("Görsel API Hatası", r.text)
+            return {"error": r.text}
+        res_json = r.json()
+        b64_data = None
+        if "data" in res_json and len(res_json["data"]) > 0:
+            b64_data = res_json["data"][0].get("b64_json")
+        elif "images" in res_json and len(res_json["images"]) > 0:
+            b64_data = res_json["images"][0]
+        return {"b64_image": b64_data, "raw": res_json}
+
+@app.post("/api/agent/execute")
+async def agent_execute(request: Request):
+    """
+    Venice.ai /chat/completions uç noktasına stream=True ile bağlanır,
+    canlı akışı web panelinde gösterir, yanıt tamamlandığında JSON'u onarıp
+    Roblox Studio'ya %100 geçerli JSON olarak teslim eder.
+    """
+    body = await request.json()
+    cfg = get_config()
+    
+    if not cfg.get("api_key"):
+        add_error_log("API Anahtarı Eksik", "Sunucu panelinden Venice.ai API anahtarınızı girmediniz.")
+        return JSONResponse({"error": "API Anahtarı eksik! [https://robloxai-1ea7.onrender.com](https://robloxai-1ea7.onrender.com) adresinden API anahtarınızı kaydedin."}, status_code=400)
+
+    user_prompt = body.get("prompt", "")
+    scene_context = body.get("scene_context", [])
+    selected_items = body.get("selected_items", [])
+    use_web = body.get("use_web", False)
+
+    web_context = ""
+    if use_web:
+        try:
+            search_res = DDGS().text(f"Roblox Luau {user_prompt[:80]}", max_results=3)
+            web_context = f"\nWEB ARAMA SONUÇLARI:\n{json.dumps(search_res, ensure_ascii=False)}\n"
+        except Exception:
+            pass
+
+    full_user_msg = (
+        f"KULLANICI KOMUTU:\n{user_prompt}\n"
+        f"{web_context}\n"
+        f"SEÇİLİ NESNELER VE TAM KODLARI ({len(selected_items)} adet):\n{json.dumps(selected_items, ensure_ascii=False)}\n\n"
+        f"MEVCUT 3D SAHNE ÖZETİ:\n{json.dumps(scene_context, ensure_ascii=False)}"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {cfg.get('api_key')}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": cfg.get("chat_model", "gemini-4-hydrogen"),
         "stream": True,
         "messages": [
             {"role": "system", "content": cfg.get("system_prompt", "")},
-            {"role": "user", "content": f"KULLANICI İSTEĞİ: {user_prompt}\n\nSAHNE VE SEÇİLİ NESNELER:\n{json.dumps(body.get('selected_items', []), ensure_ascii=False)}"}
+            {"role": "user", "content": full_user_msg[:cfg.get("max_input_length", 80000)]}
         ]
     }
 
-    async def event_generator():
-        async with httpx.AsyncClient() as client:
-            try:
-                async with client.stream("POST", f"{cfg.get('base_url')}/chat/completions", json=payload, headers=headers, timeout=90.0) as response:
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:].strip()
-                            if data_str == "[DONE]": break
-                            try:
-                                chunk = json.loads(data_str)
-                                delta = chunk["choices"][0]["delta"].get("content", "")
-                                if delta: yield delta
-                            except Exception:
-                                continue
-            except Exception as e:
-                yield f"\n[SUNUCU HATASI]: {str(e)}"
+    LIVE_STREAM_STATE["status"] = "Üretiliyor..."
+    LIVE_STREAM_STATE["buffer"] = ""
+    LIVE_STREAM_STATE["updated_at"] = time.strftime("%H:%M:%S")
 
-    return StreamingResponse(event_generator(), media_type="text/plain")
+    collected_chunks = []
+
+    try:
+        async with httpx.AsyncClient() as client:
+            async with client.stream("POST", f"{cfg.get('base_url')}/chat/completions", json=payload, headers=headers, timeout=120.0) as response:
+                if response.status_code != 200:
+                    err_body = (await response.aread()).decode("utf-8", errors="ignore")
+                    add_error_log(f"Venice API HTTP {response.status_code}", err_body)
+                    LIVE_STREAM_STATE["status"] = f"Hata ({response.status_code})"
+                    return JSONResponse({"error": f"Venice API Hatası ({response.status_code}): {err_body}"}, status_code=400)
+
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0].get("delta", {})
+                        content_piece = delta.get("content") or ""
+                        if content_piece:
+                            collected_chunks.append(content_piece)
+                            LIVE_STREAM_STATE["buffer"] = "".join(collected_chunks)[-2500:]
+                            LIVE_STREAM_STATE["updated_at"] = time.strftime("%H:%M:%S")
+                    except Exception:
+                        continue
+    except Exception as e:
+        add_error_log("Stream Bağlantı Hatası", str(e))
+        LIVE_STREAM_STATE["status"] = "Bağlantı Kesildi"
+        return JSONResponse({"error": f"Sunucu Stream Hatası: {str(e)}"}, status_code=500)
+
+    raw_full_output = "".join(collected_chunks)
+    LIVE_STREAM_STATE["status"] = "Tamamlandı"
+
+    try:
+        repaired_dict = extract_and_repair_json(raw_full_output)
+        
+        # Eğer fallback_code döndüyse ve seçili bir script varsa otomatik olarak o scripti güncelle!
+        actions = repaired_dict.get("actions", [])
+        if len(actions) == 1 and actions[0].get("type") == "fallback_code":
+            code_str = actions[0].get("source", "")
+            script_targets = [i for i in selected_items if i.get("Class") in ("Script", "LocalScript", "ModuleScript")]
+            if script_targets:
+                repaired_dict["actions"] = [{
+                    "type": "edit_script",
+                    "path": script_targets[0]["Path"],
+                    "source": code_str
+                }]
+            else:
+                repaired_dict["actions"] = [{
+                    "type": "write_script",
+                    "script_type": "Script",
+                    "name": "AIGeneratedScript",
+                    "parent": "ServerScriptService",
+                    "source": code_str
+                }]
+
+        REQUEST_LOGS.append({
+            "time": time.strftime("%H:%M:%S"),
+            "prompt": user_prompt[:200],
+            "selected_count": len(selected_items),
+            "action_count": len(repaired_dict.get("actions", [])),
+            "thought": repaired_dict.get("thought", "")[:300]
+        })
+        return JSONResponse(repaired_dict)
+    except Exception as e:
+        add_error_log("JSON Onarım Hatası", str(e), raw_full_output)
+        return JSONResponse({"error": str(e), "raw": raw_full_output[:1500]}, status_code=422)
