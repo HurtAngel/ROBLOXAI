@@ -76,13 +76,12 @@ def extract_and_repair_json(raw_text: str) -> dict:
     lua_match = re.search(r"```(?:lua|luau)?\s*(.*?)\s*```", cleaned, flags=re.DOTALL)
     code_content = lua_match.group(1) if lua_match else cleaned
     return {
-        "thought": "Model doğrudan Luau kodu üretti, otomatik olarak script/komut aksiyonuna dönüştürüldü.",
+        "thought": "Model doğrudan Luau kodu üretti, otomatik olarak script güncelleme aksiyonuna dönüştürüldü.",
         "actions": [{"type": "fallback_code", "source": code_content}]
     }
 
 @app.get("/", response_class=HTMLResponse)
 async def admin_dashboard():
-    # r""" (raw string) sayesinde JavaScript içindeki \n karakterleri asla bozulmaz
     return r"""<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -140,7 +139,7 @@ async def admin_dashboard():
 <div class="main">
     <div class="top-stats">
         <div class="stat-box"><div class="stat-title">Sunucu Adresi</div><div class="stat-val" style="color:var(--success);">robloxai-1ea7.onrender.com</div></div>
-        <div class="stat-box"><div class="stat-title">Aktif Sohbet Modeli</div><div class="stat-val" id="stat-chat">gemini-4-hydrogen</div></div>
+        <div class="stat-box"><div class="stat-title">Aktif Sohbet Modeli</div><div class="stat-val" id="stat-chat">openai-gpt-oss-120b</div></div>
         <div class="stat-box"><div class="stat-title">Aktif Görsel Modeli</div><div class="stat-val" id="stat-img">seedream-v5-5</div></div>
         <div class="stat-box"><div class="stat-title">Toplam İstek / Hata</div><div class="stat-val" id="stat-counts">0 / 0</div></div>
     </div>
@@ -157,7 +156,7 @@ async def admin_dashboard():
             </div>
 
             <div class="grid-3">
-                <div><label>Sohbet & Kodlama Modeli</label><input type="text" id="chat_model" placeholder="gemini-4-hydrogen"></div>
+                <div><label>Sohbet & Kodlama Modeli</label><input type="text" id="chat_model" placeholder="openai-gpt-oss-120b"></div>
                 <div><label>Görsel & Texture Modeli</label><input type="text" id="image_model" placeholder="seedream-v5-5"></div>
                 <div><label>Görsel Çözünürlüğü (size)</label><input type="text" id="image_size" placeholder="1K"></div>
             </div>
@@ -268,12 +267,12 @@ async function loadData() {
         document.getElementById('api_key').value = cfg.api_key || '';
         document.getElementById('base_url').value = cfg.base_url || 'https://api.venice.ai/api/v1';
         document.getElementById('max_input_length').value = cfg.max_input_length || 80000;
-        document.getElementById('chat_model').value = cfg.chat_model || 'gemini-4-hydrogen';
+        document.getElementById('chat_model').value = cfg.chat_model || 'openai-gpt-oss-120b';
         document.getElementById('image_model').value = cfg.image_model || 'seedream-v5-5';
         document.getElementById('image_size').value = cfg.image_size || '1K';
         document.getElementById('system_prompt').value = cfg.system_prompt || '';
         
-        document.getElementById('stat-chat').innerText = cfg.chat_model || 'gemini-4-hydrogen';
+        document.getElementById('stat-chat').innerText = cfg.chat_model || 'openai-gpt-oss-120b';
         document.getElementById('stat-img').innerText = cfg.image_model || 'seedream-v5-5';
         document.getElementById('stat-counts').innerText = (cfg.req_count || 0) + ' İstek / ' + (cfg.err_count || 0) + ' Hata';
         
@@ -472,7 +471,7 @@ async def test_chat():
     cfg = get_config()
     headers = {"Authorization": f"Bearer {cfg.get('api_key')}", "Content-Type": "application/json"}
     payload = {
-        "model": cfg.get("chat_model", "gemini-4-hydrogen"),
+        "model": cfg.get("chat_model", "openai-gpt-oss-120b"),
         "messages": [{"role": "user", "content": "Hello! Reply with a short greeting."}]
     }
     async with httpx.AsyncClient() as client:
@@ -523,7 +522,7 @@ async def public_config():
     cfg = get_config()
     return {
         "presets": cfg.get("presets", []),
-        "chat_model": cfg.get("chat_model", "gemini-4-hydrogen"),
+        "chat_model": cfg.get("chat_model", "openai-gpt-oss-120b"),
         "image_model": cfg.get("image_model", "seedream-v5-5"),
         "has_key": bool(cfg.get("api_key"))
     }
@@ -605,7 +604,7 @@ async def agent_execute(request: Request):
     }
 
     payload = {
-        "model": cfg.get("chat_model", "gemini-4-hydrogen"),
+        "model": cfg.get("chat_model", "openai-gpt-oss-120b"),
         "stream": True,
         "messages": [
             {"role": "system", "content": cfg.get("system_prompt", "")},
