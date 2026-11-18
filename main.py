@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from duckduckgo_search import DDGS
 
 app = FastAPI()
-DB_FILE = "architect_v2.db"
+DB_FILE = "architect_v3.db"
 TASKS = {}
 ERROR_LOGS = []
 LIVE_STATE = {"status": "Boşta", "buffer": "", "model": "openai-gpt-oss-120b"}
@@ -35,6 +35,7 @@ def init_db():
         id INTEGER PRIMARY KEY,
         venice_key TEXT,
         chat_model TEXT,
+        summarizer_model TEXT,
         image_model TEXT,
         default_signup_tokens INTEGER,
         input_cost_mult REAL,
@@ -52,17 +53,33 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM config")
     if c.fetchone()[0] == 0:
         default_prompt = (
-            "Sen Roblox Studio Baş Geliştiricisi ve 3D Fizik/Oyun Mekaniği Mühendisisin. Yanıtını SADECE geçerli bir JSON olarak döndür.\n\n"
-            "OYUN MEKANIGI VE 3D FIZIK KURALLARI:\n"
-            "1. Döngülerde `while wait()` YERİNE DAİMA `RunService.Heartbeat` (DeltaTime) kullan.\n"
-            "2. Top (futbol, basketbol), mermi veya fırlatılan objelerde Position değiştirmek yerine `ApplyImpulse`, `AssemblyLinearVelocity` ve yerçekimi dengelemesi (Y-ekseni kaldırma kuvveti) kullan.\n"
-            "3. Şut/Güç barları `os.clock()` veya `DeltaTime` ile yumuşak dolmalı, anında %100 olmamalıdır.\n"
-            "4. Boyut ve konumları dizi olarak ver: Vector3 -> [X, Y, Z], UDim2 -> [XScale, XOffset, YScale, YOffset], Color3 -> [R, G, B].\n\n"
-            "DESTEKLENEN AKSİYONLAR:\n"
-            "create_instance, edit_instance, delete_instance, write_script, edit_script, create_plugin, run_luau, insert_asset, terrain_fill"
+            "Sen Roblox Studio Baş Oyun Mimarı, 3D Fizik Mühendisi ve Kıdemli Luau Geliştiricisisin.\n"
+            "Yanıtını SADECE geçerli bir JSON nesnesi olarak döndür. Markdown veya açıklama metni ekleme.\n\n"
+            "1. ÇOK ADIMLI ARAÇ DÖNGÜSÜ (AGENT LOOP):\n"
+            "- Kullanıcı mevcut bir sistemi/scripti düzeltmeni istediğinde, önce sana verilen proje indeksine (AI_SUMMARY) bak.\n"
+            "- İlgili scriptin tam kaynak kodu henüz mesajda yoksa, tahmin yürütme! Önce şu JSON'u döndürerek kodu iste:\n"
+            "  {\"thought\": \"İlgili scriptin tam içeriğini inceliyorum.\", \"need_files\": [\"Tam.Dosya.Yolu\"], \"actions\": []}\n"
+            "- Studio o dosyaların tam kodunu sana gönderdiğinde, ikinci adımda `edit_script` ile kesin çözümü uygula.\n\n"
+            "2. 3D MİMARİ VE PROSEDÜREL İNŞA KURALLARI:\n"
+            "- Bina, malikane (mansion), stadyum veya harita istendiğinde ASLA tek bir dev kutu koyup bırakma!\n"
+            "- Büyük yapılar için `run_luau` aksiyonunu kullan ve içinde odaları, kapı boşluklarını, cam pencereleri (Transparency=0.5), eğimli çatıları (WedgePart), merdiven basamaklarını, kolonları, aydınlatmaları ve iç mobilyaları CFrame ve döngülerle inşa eden detaylı prosedürel Luau kodu çalıştır.\n\n"
+            "3. FİZİK, TUŞ ATAMA VE OYUN MEKANİĞİ KURALLARI:\n"
+            "- Klavye/Fare girdileri (`UserInputService`) ve kamera/UI işlemleri DAİMA `LocalScript` olarak `StarterPlayer.StarterPlayerScripts` veya `StarterGui` altına yazılmalıdır (Server `Script` içinde UserInputService çalışmaz!).\n"
+            "- Döngülerde `while wait()` yerine `RunService.Heartbeat` (DeltaTime) kullan. Bar/sayaç dolumları `os.clock()` veya DeltaTime ile akıcı olmalıdır.\n"
+            "- Top, mermi ve fırlatma fiziklerinde Position yerine `ApplyImpulse`, `AssemblyLinearVelocity` ve yerçekimi dengelemesi (Y-ekseni kaldırma vektörü) kullan.\n\n"
+            "4. DESTEKLENEN AKSİYON FORMATLARI:\n"
+            "- {\"type\": \"create_instance\", \"class\": \"Part\", \"name\": \"...\", \"parent\": \"Workspace\", \"properties\": {\"Size\": [10,1,10], \"Position\": [0,5,0], \"Color\": [255,0,0], \"Material\": \"SmoothPlastic\"}}\n"
+            "- {\"type\": \"edit_instance\", \"path\": \"...\", \"properties\": {...}}\n"
+            "- {\"type\": \"delete_instance\", \"path\": \"...\"}\n"
+            "- {\"type\": \"write_script\", \"script_type\": \"Script|LocalScript|ModuleScript\", \"name\": \"...\", \"parent\": \"ServerScriptService|StarterPlayer.StarterPlayerScripts|StarterGui|ReplicatedStorage\", \"source\": \"...\"}\n"
+            "- {\"type\": \"edit_script\", \"path\": \"...\", \"source\": \"...\"}\n"
+            "- {\"type\": \"run_luau\", \"description\": \"...\", \"code\": \"...\"}\n"
+            "- {\"type\": \"terrain_fill\", \"material\": \"Grass\", \"position\": [0,0,0], \"size\": [100,10,100]}\n"
+            "- {\"type\": \"insert_asset\", \"asset_id\": 123456}\n"
+            "- {\"type\": \"create_plugin\", \"name\": \"...\", \"source\": \"...\"}"
         )
         c.execute(
-            "INSERT INTO config (id, venice_key, chat_model, image_model, default_signup_tokens, input_cost_mult, output_cost_mult, system_prompt) VALUES (1, '', 'openai-gpt-oss-120b', 'seedream-v5-5', 25000, 1.0, 2.0, ?)",
+            "INSERT INTO config (id, venice_key, chat_model, summarizer_model, image_model, default_signup_tokens, input_cost_mult, output_cost_mult, system_prompt) VALUES (1, '', 'openai-gpt-oss-120b', 'google-gemma-3-27b-it', 'seedream-v5-5', 30000, 1.0, 2.0, ?)",
             (default_prompt,)
         )
     conn.commit()
@@ -93,6 +110,7 @@ def extract_and_repair_json(raw_text: str) -> dict:
         parsed = json.loads(candidate, strict=False)
         if isinstance(parsed, dict):
             parsed.setdefault("actions", [])
+            parsed.setdefault("need_files", [])
             parsed.setdefault("thought", "İşlem tamamlandı.")
             return parsed
     except Exception:
@@ -100,13 +118,17 @@ def extract_and_repair_json(raw_text: str) -> dict:
 
     try:
         fixed = re.sub(r",\s*([\]}])", r"\1", candidate)
-        return json.loads(fixed, strict=False)
+        parsed = json.loads(fixed, strict=False)
+        if isinstance(parsed, dict):
+            parsed.setdefault("actions", [])
+            parsed.setdefault("need_files", [])
+            return parsed
     except Exception:
         pass
 
     lua_match = re.search(r"```(?:lua|luau)?\s*(.*?)\s*```", cleaned, flags=re.DOTALL)
     code = lua_match.group(1) if lua_match else cleaned
-    return {"thought": "Doğrudan kod üretildi.", "actions": [{"type": "fallback_code", "source": code}]}
+    return {"thought": "Doğrudan kod üretildi.", "need_files": [], "actions": [{"type": "fallback_code", "source": code}]}
 
 def get_user_by_auth(client_key: str = None, username: str = None, password: str = None):
     conn = get_db()
@@ -120,7 +142,7 @@ def get_user_by_auth(client_key: str = None, username: str = None, password: str
         ).fetchone()
     conn.close()
     if not user:
-        raise HTTPException(status_code=401, detail="Geçersiz kullanıcı adı, şifre veya API Key")
+        raise HTTPException(status_code=401, detail="Geçersiz kullanıcı adı, şifre veya Client Key")
     return dict(user)
 
 @app.get("/", response_class=HTMLResponse)
@@ -130,18 +152,18 @@ async def web_portal():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Studio Platform</title>
+    <title>AI Studio V3 — Kontrol Merkezi</title>
     <style>
         :root { --bg: #09090b; --surface: #121216; --border: #27272a; --accent: #3b82f6; --text: #f4f4f5; --muted: #a1a1aa; --danger: #ef4444; --success: #10b981; }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
-        .sidebar { width: 270px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 8px; }
-        .sidebar h2 { font-size: 18px; font-weight: 700; margin-bottom: 16px; letter-spacing: -0.5px; }
-        .profile-card { background: var(--bg); border: 1px solid var(--border); padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 12px; }
-        .key-box { background: #18181b; padding: 6px 8px; border-radius: 4px; font-family: monospace; color: var(--success); margin-top: 6px; word-break: break-all; cursor: pointer; border: 1px dashed var(--border); }
+        .sidebar { width: 275px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+        .sidebar h2 { font-size: 18px; font-weight: 700; margin-bottom: 14px; letter-spacing: -0.5px; }
+        .profile-card { background: var(--bg); border: 1px solid var(--border); padding: 12px; border-radius: 8px; margin-bottom: 14px; font-size: 12px; }
+        .key-box { background: #18181b; padding: 7px 9px; border-radius: 4px; font-family: monospace; color: var(--success); margin-top: 6px; word-break: break-all; cursor: pointer; border: 1px dashed var(--border); }
         .nav-btn { background: transparent; border: none; color: var(--muted); padding: 11px 12px; text-align: left; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: 0.15s; }
         .nav-btn:hover, .nav-btn.active { background: var(--border); color: #fff; }
-        .main { flex: 1; padding: 36px; overflow-y: auto; }
+        .main { flex: 1; padding: 34px; overflow-y: auto; }
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin-bottom: 24px; }
         .card h3 { font-size: 15px; margin-bottom: 18px; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
         .section { display: none; }
@@ -149,9 +171,10 @@ async def web_portal():
         label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
         input, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 11px; border-radius: 6px; margin-bottom: 14px; font-family: monospace; font-size: 13px; }
         input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-        .btn { background: var(--accent); color: #fff; border: none; padding: 11px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
+        .btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
         .btn:hover { opacity: 0.9; }
         .btn-danger { background: var(--danger); padding: 6px 10px; font-size: 11px; }
+        .btn-success { background: var(--success); }
         .btn-sm { padding: 6px 12px; font-size: 12px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { padding: 11px; text-align: left; border-bottom: 1px solid var(--border); }
@@ -187,7 +210,7 @@ async def web_portal():
             <input type="text" id="reg_user">
             <label>Şifre Belirle</label>
             <input type="password" id="reg_pass">
-            <button class="btn" style="width:100%; background:var(--success);" onclick="doRegister()">Hesap Oluştur</button>
+            <button class="btn btn-success" style="width:100%;" onclick="doRegister()">Hesap Oluştur</button>
         </div>
 
         <div id="auth-msg" style="margin-top:14px; font-size:13px; color:var(--danger); display:none;"></div>
@@ -195,17 +218,18 @@ async def web_portal():
 </div>
 
 <div class="sidebar" style="display:none;" id="sidebar">
-    <h2>AI Studio</h2>
+    <h2>AI Studio V3</h2>
     <div class="profile-card">
         <div id="p-name" style="font-weight:700; font-size:14px;"></div>
         <div id="p-role" style="color:var(--muted); margin-top:2px;"></div>
         <div id="p-tokens" style="margin-top:8px; font-weight:600;"></div>
-        <div style="margin-top:8px; color:var(--muted);">Plugin Client Key (Tıkla Kopyala):</div>
+        <div style="margin-top:8px; color:var(--muted);">Client API Key (Tıkla Kopyala):</div>
         <div class="key-box" id="p-key" onclick="copyKey()"></div>
     </div>
 
-    <button class="nav-btn admin-only" onclick="nav('settings', this)">Sistem & API Ayarları</button>
+    <button class="nav-btn admin-only" onclick="nav('settings', this)">Sistem & Model Ayarları</button>
     <button class="nav-btn admin-only" onclick="nav('users', this)">Kullanıcı & Kredi Yönetimi</button>
+    <button class="nav-btn admin-only" onclick="nav('backup', this)">Yedekleme (JSON Export/Import)</button>
     <button class="nav-btn" onclick="nav('live', this)">Canlı Akış & Hata Kayıtları</button>
     <button class="nav-btn btn-danger" style="margin-top:auto; text-align:center;" onclick="logout()">Çıkış Yap</button>
 </div>
@@ -213,20 +237,21 @@ async def web_portal():
 <div class="main" style="display:none;" id="main">
     <div id="sec-settings" class="section admin-only">
         <div class="card">
-            <h3>Venice API, Model ve Token Maliyet Ayarları</h3>
+            <h3>Venice API, Çift Model ve Token Maliyet Ayarları</h3>
             <label>Venice.ai API Anahtarı</label>
             <input type="password" id="venice_key">
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-                <div><label>Aktif Sohbet Modeli</label><input type="text" id="chat_model"></div>
-                <div><label>Aktif Görsel Modeli</label><input type="text" id="image_model"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+                <div><label>Ana Kodlayıcı Model</label><input type="text" id="chat_model"></div>
+                <div><label>Özetleyici Model (Indexer)</label><input type="text" id="summarizer_model"></div>
+                <div><label>Görsel Modeli</label><input type="text" id="image_model"></div>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
                 <div><label>Yeni Kayıt Başlangıç Kredisi</label><input type="number" id="default_signup_tokens"></div>
                 <div><label>Input Token Çarpanı</label><input type="number" step="0.1" id="input_cost_mult"></div>
                 <div><label>Output Token Çarpanı</label><input type="number" step="0.1" id="output_cost_mult"></div>
             </div>
-            <label>Sistem Talimatı (System Prompt)</label>
-            <textarea id="system_prompt" rows="10"></textarea>
+            <label>Evrensel Sistem Talimatı (System Prompt)</label>
+            <textarea id="system_prompt" rows="12"></textarea>
             <button class="btn" onclick="saveSettings()">Ayarları Kaydet</button>
         </div>
     </div>
@@ -238,6 +263,19 @@ async def web_portal():
                 <thead><tr><th>ID</th><th>Kullanıcı Adı</th><th>Rol</th><th>Client API Key</th><th>Kredi (Token)</th><th>İşlem</th></tr></thead>
                 <tbody id="users-table"></tbody>
             </table>
+        </div>
+    </div>
+
+    <div id="sec-backup" class="section admin-only">
+        <div class="card">
+            <h3>Tam Sistem Yedeği (Kullanıcılar, Modeller, Promptlar, Değişkenler)</h3>
+            <p style="font-size:13px; color:var(--muted); margin-bottom:16px;">Render sunucusu yeniden başlatıldığında verilerin kaybolmaması için tüm veritabanını JSON olarak indirebilir ve tek tıkla geri yükleyebilirsiniz.</p>
+            <div style="display:flex; gap:12px; margin-bottom:20px;">
+                <button class="btn btn-success" onclick="downloadBackup()">⬇️ Tüm Veritabanını JSON İndir</button>
+            </div>
+            <label>JSON Yedek Dosyasından Geri Yükle (.json seçin)</label>
+            <input type="file" id="backup_file" accept=".json" style="padding:8px;">
+            <button class="btn" onclick="uploadBackup()">⬆️ Yedeği Geri Yükle (Import)</button>
         </div>
     </div>
 
@@ -310,7 +348,7 @@ function initSession(user) {
     document.getElementById('main').style.display = 'block';
 
     document.getElementById('p-name').innerText = user.username;
-    document.getElementById('p-role').innerText = user.role === 'admin' ? 'Yetki: Yönetici (Sınırsız)' : 'Yetki: Standart Kullanıcı';
+    document.getElementById('p-role').innerText = user.role === 'admin' ? 'Yetki: Yönetici (Sınırsız)' : 'Yetki: Kullanıcı';
     document.getElementById('p-tokens').innerText = user.role === 'admin' ? 'Kredi: ∞ Sınırsız' : `Kalan Kredi: ${user.tokens} Token`;
     document.getElementById('p-key').innerText = user.client_key;
 
@@ -354,8 +392,9 @@ async function loadSettings() {
     const cfg = await res.json();
     document.getElementById('venice_key').value = cfg.venice_key || '';
     document.getElementById('chat_model').value = cfg.chat_model || '';
+    document.getElementById('summarizer_model').value = cfg.summarizer_model || '';
     document.getElementById('image_model').value = cfg.image_model || '';
-    document.getElementById('default_signup_tokens').value = cfg.default_signup_tokens || 25000;
+    document.getElementById('default_signup_tokens').value = cfg.default_signup_tokens || 30000;
     document.getElementById('input_cost_mult').value = cfg.input_cost_mult || 1.0;
     document.getElementById('output_cost_mult').value = cfg.output_cost_mult || 2.0;
     document.getElementById('system_prompt').value = cfg.system_prompt || '';
@@ -365,8 +404,9 @@ async function saveSettings() {
     await apiFetch('/api/admin/config', 'POST', {
         venice_key: document.getElementById('venice_key').value.trim(),
         chat_model: document.getElementById('chat_model').value.trim(),
+        summarizer_model: document.getElementById('summarizer_model').value.trim(),
         image_model: document.getElementById('image_model').value.trim(),
-        default_signup_tokens: parseInt(document.getElementById('default_signup_tokens').value) || 25000,
+        default_signup_tokens: parseInt(document.getElementById('default_signup_tokens').value) || 30000,
         input_cost_mult: parseFloat(document.getElementById('input_cost_mult').value) || 1.0,
         output_cost_mult: parseFloat(document.getElementById('output_cost_mult').value) || 2.0,
         system_prompt: document.getElementById('system_prompt').value
@@ -403,6 +443,34 @@ async function delUser(id) {
     loadUsers();
 }
 
+async function downloadBackup() {
+    const res = await apiFetch('/api/admin/backup/export');
+    if (!res.ok) return alert('Yedek alınamadı');
+    const data = await res.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai_studio_backup_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function uploadBackup() {
+    const fileInput = document.getElementById('backup_file');
+    if (!fileInput.files.length) return alert('Lütfen bir .json yedek dosyası seçin.');
+    const text = await fileInput.files[0].text();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { return alert('Geçersiz JSON dosyası.'); }
+    const res = await apiFetch('/api/admin/backup/import', 'POST', parsed);
+    if (res.ok) {
+        alert('Yedek başarıyla geri yüklendi! Sayfa yenileniyor...');
+        location.reload();
+    } else {
+        alert('Geri yükleme hatası.');
+    }
+}
+
 async function loadLiveAndErrors() {
     const res = await apiFetch('/api/status/live');
     if (!res.ok) return;
@@ -429,26 +497,24 @@ setInterval(() => {
 </body>
 </html>"""
 
-# --- KİMLİK DOĞRULAMA API ---
+# --- AUTH API ---
 @app.post("/api/auth/login")
 async def login(request: Request):
-    data = await request.json()
-    user = get_user_by_auth(username=data.get("username"), password=data.get("password"))
-    return {"username": user["username"], "role": user["role"], "tokens": user["tokens"], "client_key": user["client_key"]}
+    d = await request.json()
+    u = get_user_by_auth(username=d.get("username"), password=d.get("password"))
+    return {"username": u["username"], "role": u["role"], "tokens": u["tokens"], "client_key": u["client_key"]}
 
 @app.post("/api/auth/register")
 async def register(request: Request):
-    data = await request.json()
-    username = (data.get("username") or "").strip()
-    password = data.get("password") or ""
+    d = await request.json()
+    username = (d.get("username") or "").strip()
+    password = d.get("password") or ""
     if len(username) < 3 or len(password) < 4:
         raise HTTPException(status_code=400, detail="Kullanıcı adı en az 3, şifre en az 4 karakter olmalıdır.")
-
     conn = get_db()
     cfg = conn.execute("SELECT default_signup_tokens FROM config WHERE id=1").fetchone()
-    start_tokens = cfg["default_signup_tokens"] if cfg else 25000
+    start_tokens = cfg["default_signup_tokens"] if cfg else 30000
     new_key = "rbx-usr-" + uuid.uuid4().hex[:14]
-
     try:
         conn.execute(
             "INSERT INTO users (username, password_hash, client_key, role, tokens) VALUES (?, ?, ?, 'user', ?)",
@@ -457,16 +523,16 @@ async def register(request: Request):
         conn.commit()
     except sqlite3.IntegrityError:
         conn.close()
-        raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten alınmış.")
+        raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten mevcut.")
     conn.close()
     return {"username": username, "role": "user", "tokens": start_tokens, "client_key": new_key}
 
 @app.get("/api/auth/me")
 async def auth_me(client_key: str = Header(None)):
-    user = get_user_by_auth(client_key=client_key)
-    return {"username": user["username"], "role": user["role"], "tokens": user["tokens"], "client_key": user["client_key"]}
+    u = get_user_by_auth(client_key=client_key)
+    return {"username": u["username"], "role": u["role"], "tokens": u["tokens"], "client_key": u["client_key"]}
 
-# --- ADMIN YÖNETİM API ---
+# --- ADMIN CONFIG & USERS ---
 @app.get("/api/admin/config")
 async def get_conf(client_key: str = Header(None)):
     if get_user_by_auth(client_key=client_key)["role"] != "admin":
@@ -483,8 +549,8 @@ async def save_conf(request: Request, client_key: str = Header(None)):
     d = await request.json()
     conn = get_db()
     conn.execute(
-        "UPDATE config SET venice_key=?, chat_model=?, image_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=? WHERE id=1",
-        (d["venice_key"], d["chat_model"], d["image_model"], d["default_signup_tokens"], d["input_cost_mult"], d["output_cost_mult"], d["system_prompt"])
+        "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=? WHERE id=1",
+        (d["venice_key"], d["chat_model"], d["summarizer_model"], d["image_model"], d["default_signup_tokens"], d["input_cost_mult"], d["output_cost_mult"], d["system_prompt"])
     )
     conn.commit()
     conn.close()
@@ -521,6 +587,101 @@ async def delete_user(user_id: int, client_key: str = Header(None)):
     conn.close()
     return {"status": "ok"}
 
+# --- TAM JSON YEDEKLEME (EXPORT / IMPORT) ---
+@app.get("/api/admin/backup/export")
+async def export_backup(client_key: str = Header(None)):
+    if get_user_by_auth(client_key=client_key)["role"] != "admin":
+        raise HTTPException(status_code=403)
+    conn = get_db()
+    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
+    users = [dict(u) for u in conn.execute("SELECT * FROM users").fetchall()]
+    conn.close()
+    return {
+        "backup_version": "3.0",
+        "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "config": cfg,
+        "users": users
+    }
+
+@app.post("/api/admin/backup/import")
+async def import_backup(request: Request, client_key: str = Header(None)):
+    if get_user_by_auth(client_key=client_key)["role"] != "admin":
+        raise HTTPException(status_code=403)
+    data = await request.json()
+    conn = get_db()
+    if "config" in data and isinstance(data["config"], dict):
+        c = data["config"]
+        conn.execute(
+            "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=? WHERE id=1",
+            (
+                c.get("venice_key", ""),
+                c.get("chat_model", "openai-gpt-oss-120b"),
+                c.get("summarizer_model", "google-gemma-3-27b-it"),
+                c.get("image_model", "seedream-v5-5"),
+                c.get("default_signup_tokens", 30000),
+                c.get("input_cost_mult", 1.0),
+                c.get("output_cost_mult", 2.0),
+                c.get("system_prompt", "")
+            )
+        )
+    if "users" in data and isinstance(data["users"], list):
+        conn.execute("DELETE FROM users")
+        for u in data["users"]:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, client_key, role, tokens) VALUES (?, ?, ?, ?, ?)",
+                (u["username"], u["password_hash"], u["client_key"], u["role"], u["tokens"])
+            )
+    conn.commit()
+    conn.close()
+    return {"status": "restored"}
+
+# --- ÖZETLEYİCİ MODEL (CODEBASE INDEXER) ---
+@app.post("/api/agent/summarize")
+async def summarize_scripts(request: Request, client_key: str = Header(None)):
+    user = get_user_by_auth(client_key=client_key)
+    d = await request.json()
+    scripts = d.get("scripts", [])
+    if not scripts:
+        return {"summaries": {}}
+
+    conn = get_db()
+    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
+    conn.close()
+
+    if not cfg["venice_key"]:
+        raise HTTPException(status_code=400, detail="Venice API anahtarı tanımlı değil.")
+
+    sys_msg = (
+        "Sen bir Roblox Luau Kod İndeksleyicisisin. Sana verilen her script için ne işe yaradığını, hangi tuşları/eventleri kullandığını "
+        "1-2 kısa Türkçe cümleyle özetle. SADECE şu JSON formatında yanıt ver: {\"summaries\": {\"Dosya.Yolu\": \"Kısa özet\"}}"
+    )
+    user_msg = json.dumps(scripts, ensure_ascii=False)[:45000]
+
+    headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
+    payload = {
+        "model": cfg.get("summarizer_model") or "google-gemma-3-27b-it",
+        "messages": [
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": user_msg}
+        ]
+    }
+
+    async with httpx.AsyncClient() as client:
+        r = await client.post("https://api.venice.ai/api/v1/chat/completions", json=payload, headers=headers, timeout=90.0)
+        if r.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Özetleyici API Hatası: {r.text}")
+        raw_content = r.json()["choices"][0]["message"]["content"]
+        parsed = extract_and_repair_json(raw_content)
+
+    if user["role"] != "admin":
+        cost = int(estimate_tokens(user_msg) * 0.5)
+        conn = get_db()
+        conn.execute("UPDATE users SET tokens = MAX(0, tokens - ?) WHERE id = ?", (cost, user["id"]))
+        conn.commit()
+        conn.close()
+
+    return {"summaries": parsed.get("summaries", {})}
+
 # --- CANLI DURUM & HATA LOGLARI ---
 @app.get("/api/status/live")
 async def live_status(client_key: str = Header(None)):
@@ -538,7 +699,7 @@ async def log_err(request: Request):
     ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": d.get("type", "Hata"), "details": d.get("details", "")})
     return {"status": "ok"}
 
-# --- ASENKRON AI MOTORU ---
+# --- ASENKRON ANA AJAN MOTORU ---
 async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
     conn = get_db()
     cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
@@ -629,7 +790,7 @@ async def execute_task(request: Request, client_key: str = Header(None)):
     task_id = str(uuid.uuid4())
     TASKS[task_id] = {"status": "processing", "buffer": "Bağlanılıyor..."}
     asyncio.create_task(process_task(task_id, user, payload, raw_in_tokens))
-    return {"task_id": task_id, "role": user["role"], "username": user["username"], "tokens": user["tokens"]}
+    return {"task_id": task_id, "role": user["role"], "username": user["username"]}
 
 @app.get("/api/agent/poll")
 async def poll_task(task_id: str, client_key: str = Header(None)):
