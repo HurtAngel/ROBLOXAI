@@ -42,6 +42,13 @@ def init_db():
         output_cost_mult REAL,
         system_prompt TEXT
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS memory_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        prompt TEXT,
+        ai_summary TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )''')
 
     c.execute("SELECT COUNT(*) FROM users WHERE username = 'Admin'")
     if c.fetchone()[0] == 0:
@@ -55,6 +62,8 @@ def init_db():
         default_prompt = (
             "Sen Roblox Studio Baş Oyun Mimarı, 3D Fizik Mühendisi ve Kıdemli Luau Geliştiricisisin.\n"
             "Yanıtını SADECE geçerli bir JSON nesnesi olarak döndür. Markdown veya açıklama metni ekleme.\n\n"
+            "0. HAFIZA (GEÇMİŞ) VE BAĞLAM:\n"
+            "- Sana 'GECMIS_HAFIZA' dizisi gönderilecek. Kullanıcı 'bunu yavaşlat', 'şunu sil' derse, hedefin dosya yolunu önceki işlemlerinden anla.\n\n"
             "1. ÇOK ADIMLI ARAÇ DÖNGÜSÜ (AGENT LOOP):\n"
             "- Kullanıcı mevcut bir sistemi/scripti düzeltmeni istediğinde, önce sana verilen proje indeksine (AI_SUMMARY) bak.\n"
             "- İlgili scriptin tam kaynak kodu henüz mesajda yoksa, tahmin yürütme! Önce şu JSON'u döndürerek kodu iste:\n"
@@ -587,6 +596,16 @@ async def delete_user(user_id: int, client_key: str = Header(None)):
     conn.close()
     return {"status": "ok"}
 
+# --- HAFIZA TEMİZLEME API ---
+@app.delete("/api/agent/memory")
+async def clear_memory(client_key: str = Header(None)):
+    user = get_user_by_auth(client_key=client_key)
+    conn = get_db()
+    conn.execute("DELETE FROM memory_logs WHERE user_id=?", (user["id"],))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
 # --- TAM JSON YEDEKLEME (EXPORT / IMPORT) ---
 @app.get("/api/admin/backup/export")
 async def export_backup(client_key: str = Header(None)):
@@ -699,11 +718,22 @@ async def log_err(request: Request):
     ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": d.get("type", "Hata"), "details": d.get("details", "")})
     return {"status": "ok"}
 
-# --- ASENKRON ANA AJAN MOTORU ---
+# --- ASENKRON ANA AJAN MOTORU (HAFIZA SİSTEMLİ) ---
 async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
     conn = get_db()
     cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
+    
+    # Kullanıcının önceki hafıza kayıtlarını çek
+    mem_records = conn.execute("SELECT prompt, ai_summary FROM memory_logs WHERE user_id = ? ORDER BY id DESC LIMIT 8", (user["id"],)).fetchall()
     conn.close()
+
+    memory_list = [{"Kullanıcı_Talebi": r["prompt"], "Yaptığın_Düzenlemeler": r["ai_summary"]} for r in reversed(mem_records)]
+    
+    # Hafızayı ve yeni görevi birleştir
+    enriched_payload = {
+        "GECMIS_HAFIZA": memory_list,
+        "YENI_GOREV": payload
+    }
 
     if not cfg["venice_key"]:
         TASKS[task_id] = {"status": "failed", "error": "Yönetici henüz Venice API anahtarını girmemiş."}
@@ -715,7 +745,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         "stream": True,
         "messages": [
             {"role": "system", "content": cfg["system_prompt"]},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)[:65000]}
+            {"role": "user", "content": json.dumps(enriched_payload, ensure_ascii=False)[:65000]}
         ]
     }
 
@@ -762,6 +792,19 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
 
         repaired_json = extract_and_repair_json(full_output)
         actions = repaired_json.get("actions", [])
+        
+        # Başarılı işlemi hafızaya kaydet
+        if not repaired_json.get("need_files"):
+            act_descs = [f"{a.get('type')}: {a.get('name') or a.get('path') or 'nesne'}" for a in actions]
+            ai_summary = repaired_json.get("thought", "Düzenlemeler yapıldı.")
+            if act_descs:
+                ai_summary += " (Değişenler: " + ", ".join(act_descs) + ")"
+            
+            conn = get_db()
+            conn.execute("INSERT INTO memory_logs (user_id, prompt, ai_summary) VALUES (?, ?, ?)", (user["id"], payload.get("prompt", "")[:500], ai_summary[:1000]))
+            conn.commit()
+            conn.close()
+
         if len(actions) == 1 and actions[0].get("type") == "fallback_code":
             selected = payload.get("selected_items", [])
             scripts = [s for s in selected if s.get("Class") in ("Script", "LocalScript", "ModuleScript")]
