@@ -9,7 +9,11 @@ import hashlib
 import httpx
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from duckduckgo_search import DDGS
+
+try:
+    from duckduckgo_search import DDGS
+except Exception:
+    DDGS = None
 
 app = FastAPI()
 DB_FILE = "architect_v3.db"
@@ -60,31 +64,41 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM config")
     if c.fetchone()[0] == 0:
         default_prompt = (
-            "Sen Roblox Studio Baş Oyun Mimarı, 3D Fizik Mühendisi ve Kıdemli Luau Geliştiricisisin.\n"
-            "Yanıtını SADECE geçerli bir JSON nesnesi olarak döndür. Markdown veya açıklama metni ekleme.\n\n"
-            "0. HAFIZA (GEÇMİŞ) VE BAĞLAM:\n"
-            "- Sana 'GECMIS_HAFIZA' dizisi gönderilecek. Kullanıcı 'bunu yavaşlat', 'şunu sil' derse, hedefin dosya yolunu önceki işlemlerinden anla.\n\n"
-            "1. ÇOK ADIMLI ARAÇ DÖNGÜSÜ (AGENT LOOP):\n"
-            "- Kullanıcı mevcut bir sistemi/scripti düzeltmeni istediğinde, önce sana verilen proje indeksine (AI_SUMMARY) bak.\n"
-            "- İlgili scriptin tam kaynak kodu henüz mesajda yoksa, tahmin yürütme! Önce şu JSON'u döndürerek kodu iste:\n"
-            "  {\"thought\": \"İlgili scriptin tam içeriğini inceliyorum.\", \"need_files\": [\"Tam.Dosya.Yolu\"], \"actions\": []}\n"
-            "- Studio o dosyaların tam kodunu sana gönderdiğinde, ikinci adımda `edit_script` ile kesin çözümü uygula.\n\n"
-            "2. 3D MİMARİ VE PROSEDÜREL İNŞA KURALLARI:\n"
-            "- Bina, malikane (mansion), stadyum veya harita istendiğinde ASLA tek bir dev kutu koyup bırakma!\n"
-            "- Büyük yapılar için `run_luau` aksiyonunu kullan ve içinde odaları, kapı boşluklarını, cam pencereleri (Transparency=0.5), eğimli çatıları (WedgePart), merdiven basamaklarını, kolonları, aydınlatmaları ve iç mobilyaları CFrame ve döngülerle inşa eden detaylı prosedürel Luau kodu çalıştır.\n\n"
-            "3. FİZİK, TUŞ ATAMA VE OYUN MEKANİĞİ KURALLARI:\n"
-            "- Klavye/Fare girdileri (`UserInputService`) ve kamera/UI işlemleri DAİMA `LocalScript` olarak `StarterPlayer.StarterPlayerScripts` veya `StarterGui` altına yazılmalıdır (Server `Script` içinde UserInputService çalışmaz!).\n"
-            "- Döngülerde `while wait()` yerine `RunService.Heartbeat` (DeltaTime) kullan. Bar/sayaç dolumları `os.clock()` veya DeltaTime ile akıcı olmalıdır.\n"
-            "- Top, mermi ve fırlatma fiziklerinde Position yerine `ApplyImpulse`, `AssemblyLinearVelocity` ve yerçekimi dengelemesi (Y-ekseni kaldırma vektörü) kullan.\n\n"
-            "4. DESTEKLENEN AKSİYON FORMATLARI:\n"
-            "- {\"type\": \"create_instance\", \"class\": \"Part\", \"name\": \"...\", \"parent\": \"Workspace\", \"properties\": {\"Size\": [10,1,10], \"Position\": [0,5,0], \"Color\": [255,0,0], \"Material\": \"SmoothPlastic\"}}\n"
+            "Sen Roblox Studio Baş Oyun Mimarı, 3D Fizik Mühendisi, Rig Animatörü ve Kıdemli Luau Geliştiricisisin.\n"
+            "Yanıtını SADECE geçerli, tek bir JSON nesnesi olarak döndür. Markdown blokları veya açıklama metni ekleme.\n\n"
+            "0. HAFIZA (GEÇMİŞ) VE ÇOK ADIMLI ARAÇ DÖNGÜSÜ:\n"
+            "- Sana gönderilen 'GECMIS_HAFIZA' ve 'scene_hierarchy' alanlarını incele. Kullanıcı 'bunu yavaşlat', 'UI gizle', 'şunu düzelt' derse hedefi buradan bul.\n"
+            "- Mevcut bir scripti düzenleyeceksen ve tam kaynak kodu henüz 'selected_items' veya 'requested_files_content' içinde yoksa tahmin etme! Önce şu JSON'u döndür:\n"
+            "  {\"thought\": \"Dosyayı okuyorum.\", \"need_files\": [\"Tam.Dosya.Yolu\"], \"actions\": []}\n"
+            "- Aynı dosyayı asla ikinci kez isteme; içerik geldiğinde doğrudan `edit_script` uygula.\n\n"
+            "1. GERÇEK 3D MODEL ARAMA (ROBLOX TOOLBOX):\n"
+            "- Kullanıcı gerçekçi 3D objeler (ev, malikane, araba, ağaç, silah, mobilya, stadyum vb.) istediğinde kutu yığmak yerine ÖNCE Roblox Toolbox'ta arama yapabilirsin.\n"
+            "- Arama yapmak için şu JSON'u döndür (sunucu sonuçları anında sana geri verecektir):\n"
+            "  {\"thought\": \"Roblox Toolbox'ta uygun 3D modelleri arıyorum.\", \"search_toolbox\": [\"modern mansion\", \"sports car\"], \"actions\": []}\n"
+            "- Sunucudan gerçek AssetId listesi geldiğinde `insert_asset` aksiyonuyla (position, rotation, scale, strip_scripts belirterek) modelleri sahneye yerleştir.\n"
+            "- `strip_scripts: true` seçeneği, indirilen hazır modellerin içindeki bozuk/virüslü eski scriptleri temizler; kendi temiz sürüş/mekanik scriptlerini yazacaksan `strip_scripts: true` kullan.\n\n"
+            "2. İŞLEVSELLİK VE UI GÖRÜNÜRLÜK KURALLARI (KRİTİK):\n"
+            "- Bir mekanik istendiğinde SADECE 3D parça koyup bırakma; mutlaka Server `Script` ve Client `LocalScript` dosyalarını `write_script` ile ekle.\n"
+            "- **EDIT MODE UI KURALI:** `StarterGui` altına oluşturduğun HER `ScreenGui` için `Enabled = false` ayarla ki geliştirici ekranında (Edit Mode) 3D sahneyi kapatmasın! Oyun başladığında (Play Mode) `LocalScript` içinden `screenGui.Enabled = true` yaparak aç (menü/mağaza panelleri `Visible = false` başlasın).\n"
+            "- Kullanıcı mevcut bir UI'ın ekranı kapattığını söylerse `scene_hierarchy` içindeki `StarterGui` elemanlarını bul ve `edit_instance` ile `Enabled = false` yap.\n\n"
+            "3. 3D MİMARİ VE FİZİK KURALLARI:\n"
+            "- Prosedürel bina/harita istendiğinde dev kutu yapma; `run_luau` ile çok parçalı prosedürel Luau kodu çalıştır.\n"
+            "- Klavye/Fare (`UserInputService`) ve kamera işlemleri DAİMA `LocalScript` olarak `StarterPlayer.StarterPlayerScripts` veya `StarterGui` altına yazılmalıdır.\n"
+            "- Döngülerde `while wait()` yerine `RunService.Heartbeat(dt)` kullan. Fırlatma/top fiziklerinde `ApplyImpulse` / `AssemblyLinearVelocity` kullan.\n\n"
+            "4. RİG VE ANİMASYON ÜRETİMİ (KEYFRAMESEQUENCE & MOTOR6D):\n"
+            "- Seçili Rig içindeki `Motor6D` eklem listesi (`RigJoints`) sana gönderilir.\n"
+            "- Gerçek Studio animasyonu (Animation Editor uyumlu) istendiğinde `create_animation` aksiyonunu kullan. Her keyframe içinde `time` (saniye) ve `poses` (Part1 adı -> `pos`: [x,y,z], `rot`: [rx,ry,rz] derece cinsinden, `easing`: \"Linear|Cubic|Elastic|Bounce\") tanımla.\n"
+            "- Anında oyun içinde oynatılacak prosedürel animasyon istenirse `write_script` ile `Motor6D.Transform` üzerinden `RunService.RenderStepped` veya `TweenService` kullan.\n\n"
+            "5. DESTEKLENEN AKSİYON FORMATLARI:\n"
+            "- {\"type\": \"create_instance\", \"class\": \"Part|ScreenGui|Frame\", \"name\": \"...\", \"parent\": \"Workspace|StarterGui\", \"properties\": {...}}\n"
             "- {\"type\": \"edit_instance\", \"path\": \"...\", \"properties\": {...}}\n"
             "- {\"type\": \"delete_instance\", \"path\": \"...\"}\n"
             "- {\"type\": \"write_script\", \"script_type\": \"Script|LocalScript|ModuleScript\", \"name\": \"...\", \"parent\": \"ServerScriptService|StarterPlayer.StarterPlayerScripts|StarterGui|ReplicatedStorage\", \"source\": \"...\"}\n"
             "- {\"type\": \"edit_script\", \"path\": \"...\", \"source\": \"...\"}\n"
+            "- {\"type\": \"create_animation\", \"name\": \"SwordSlash\", \"rig_path\": \"Workspace.Rig\", \"loop\": false, \"priority\": \"Action\", \"keyframes\": [{\"time\": 0.0, \"poses\": {\"RightUpperArm\": {\"pos\": [0,0,0], \"rot\": [-45,0,15], \"easing\": \"Cubic\"}}}, {\"time\": 0.25, \"poses\": {\"RightUpperArm\": {\"pos\": [0,0,0], \"rot\": [60,0,-20], \"easing\": \"Cubic\"}}}]}\n"
+            "- {\"type\": \"insert_asset\", \"asset_id\": 123456, \"name\": \"SportsCar\", \"parent\": \"Workspace\", \"position\": [0,5,0], \"rotation\": [0,90,0], \"scale\": 1.0, \"strip_scripts\": true}\n"
             "- {\"type\": \"run_luau\", \"description\": \"...\", \"code\": \"...\"}\n"
             "- {\"type\": \"terrain_fill\", \"material\": \"Grass\", \"position\": [0,0,0], \"size\": [100,10,100]}\n"
-            "- {\"type\": \"insert_asset\", \"asset_id\": 123456}\n"
             "- {\"type\": \"create_plugin\", \"name\": \"...\", \"source\": \"...\"}"
         )
         c.execute(
@@ -120,6 +134,7 @@ def extract_and_repair_json(raw_text: str) -> dict:
         if isinstance(parsed, dict):
             parsed.setdefault("actions", [])
             parsed.setdefault("need_files", [])
+            parsed.setdefault("search_toolbox", [])
             parsed.setdefault("thought", "İşlem tamamlandı.")
             return parsed
     except Exception:
@@ -131,13 +146,15 @@ def extract_and_repair_json(raw_text: str) -> dict:
         if isinstance(parsed, dict):
             parsed.setdefault("actions", [])
             parsed.setdefault("need_files", [])
+            parsed.setdefault("search_toolbox", [])
+            parsed.setdefault("thought", "İşlem tamamlandı.")
             return parsed
     except Exception:
         pass
 
     lua_match = re.search(r"```(?:lua|luau)?\s*(.*?)\s*```", cleaned, flags=re.DOTALL)
     code = lua_match.group(1) if lua_match else cleaned
-    return {"thought": "Doğrudan kod üretildi.", "need_files": [], "actions": [{"type": "fallback_code", "source": code}]}
+    return {"thought": "Doğrudan kod üretildi.", "need_files": [], "search_toolbox": [], "actions": [{"type": "fallback_code", "source": code}]}
 
 def get_user_by_auth(client_key: str = None, username: str = None, password: str = None):
     conn = get_db()
@@ -154,6 +171,42 @@ def get_user_by_auth(client_key: str = None, username: str = None, password: str
         raise HTTPException(status_code=401, detail="Geçersiz kullanıcı adı, şifre veya Client Key")
     return dict(user)
 
+# --- ROBLOX TOOLBOX / CREATOR STORE 3D MODEL ARAMA MOTORU ---
+async def search_roblox_toolbox(keyword: str, limit: int = 6) -> list:
+    results = []
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://apis.roblox.com/toolbox-service/v1/marketplace/10",
+                params={"keyword": keyword, "num": limit, "sortType": "Relevance", "includeOnlyVerifiedCreators": "false"}
+            )
+            if r.status_code == 200:
+                data = r.json()
+                ids = [str(item["id"]) for item in data.get("data", []) if "id" in item][:limit]
+                if ids:
+                    det = await client.get(
+                        "https://apis.roblox.com/toolbox-service/v1/items/details",
+                        params={"assetIds": ",".join(ids)}
+                    )
+                    if det.status_code == 200:
+                        for item in det.json().get("data", []):
+                            asset = item.get("asset", {})
+                            creator = item.get("creator", {})
+                            voting = item.get("voting", {})
+                            results.append({
+                                "asset_id": asset.get("id"),
+                                "name": asset.get("name", "Model"),
+                                "creator": creator.get("name", "Unknown"),
+                                "up_votes": voting.get("upVotes", 0),
+                                "down_votes": voting.get("downVotes", 0)
+                            })
+                        return results
+                    else:
+                        return [{"asset_id": int(i), "name": f"{keyword} Model #{idx+1}"} for idx, i in enumerate(ids)]
+    except Exception as e:
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Toolbox Arama Hatası", "details": str(e)})
+    return results
+
 @app.get("/", response_class=HTMLResponse)
 async def web_portal():
     return r"""<!DOCTYPE html>
@@ -161,7 +214,7 @@ async def web_portal():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Studio V3 — Kontrol Merkezi</title>
+    <title>AI Studio V4 — Kontrol Merkezi</title>
     <style>
         :root { --bg: #09090b; --surface: #121216; --border: #27272a; --accent: #3b82f6; --text: #f4f4f5; --muted: #a1a1aa; --danger: #ef4444; --success: #10b981; }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -178,8 +231,8 @@ async def web_portal():
         .section { display: none; }
         .section.active { display: block; }
         label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
-        input, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 11px; border-radius: 6px; margin-bottom: 14px; font-family: monospace; font-size: 13px; }
-        input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+        input, textarea, select { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 11px; border-radius: 6px; margin-bottom: 14px; font-family: monospace; font-size: 13px; }
+        input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
         .btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
         .btn:hover { opacity: 0.9; }
         .btn-danger { background: var(--danger); padding: 6px 10px; font-size: 11px; }
@@ -195,6 +248,7 @@ async def web_portal():
         .auth-tab.active { background: var(--border); color: #fff; }
         .admin-only { display: none; }
         .log-box { background: var(--bg); border: 1px solid var(--border); padding: 14px; border-radius: 6px; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+        .img-preview { max-width: 100%; max-height: 420px; border-radius: 8px; border: 1px solid var(--border); margin-top: 14px; display: none; }
     </style>
 </head>
 <body>
@@ -227,7 +281,7 @@ async def web_portal():
 </div>
 
 <div class="sidebar" style="display:none;" id="sidebar">
-    <h2>AI Studio V3</h2>
+    <h2>AI Studio V4</h2>
     <div class="profile-card">
         <div id="p-name" style="font-weight:700; font-size:14px;"></div>
         <div id="p-role" style="color:var(--muted); margin-top:2px;"></div>
@@ -239,6 +293,7 @@ async def web_portal():
     <button class="nav-btn admin-only" onclick="nav('settings', this)">Sistem & Model Ayarları</button>
     <button class="nav-btn admin-only" onclick="nav('users', this)">Kullanıcı & Kredi Yönetimi</button>
     <button class="nav-btn admin-only" onclick="nav('backup', this)">Yedekleme (JSON Export/Import)</button>
+    <button class="nav-btn" onclick="nav('images', this)">Görsel & UI Asset Üretici</button>
     <button class="nav-btn" onclick="nav('live', this)">Canlı Akış & Hata Kayıtları</button>
     <button class="nav-btn btn-danger" style="margin-top:auto; text-align:center;" onclick="logout()">Çıkış Yap</button>
 </div>
@@ -288,6 +343,22 @@ async def web_portal():
         </div>
     </div>
 
+    <div id="sec-images" class="section">
+        <div class="card">
+            <h3>Venice AI Görsel, UI Arka Planı & İkon Üretici</h3>
+            <label>Görsel İsteği (İngilizce yazmanız daha yüksek kalite verir)</label>
+            <textarea id="img_prompt" rows="3" placeholder="Örn: Sleek dark sci-fi game shop UI panel background, neon blue borders, clean flat vector icon style"></textarea>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+                <div><label>Genişlik (Width)</label><input type="number" id="img_width" value="1024"></div>
+                <div><label>Yükseklik (Height)</label><input type="number" id="img_height" value="1024"></div>
+            </div>
+            <button class="btn" id="img_gen_btn" onclick="generateImage()">🎨 Görsel Üret</button>
+            <button class="btn btn-success" id="img_dl_btn" style="display:none; margin-left:8px;" onclick="downloadGeneratedImg()">⬇️ PNG İndir (Studio'ya Yükle)</button>
+            <div id="img_status" style="margin-top:10px; font-size:12px; color:var(--muted);"></div>
+            <img id="img_output" class="img-preview" alt="Generated UI Asset">
+        </div>
+    </div>
+
     <div id="sec-live" class="section">
         <div class="card">
             <h3>Aktif Model & Canlı AI Akışı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
@@ -302,6 +373,7 @@ async def web_portal():
 
 <script>
 let currentUser = null;
+let lastGeneratedDataUrl = "";
 
 function switchAuth(mode) {
     document.getElementById('form-login').style.display = mode === 'login' ? 'block' : 'none';
@@ -366,7 +438,7 @@ function initSession(user) {
         loadSettings();
         nav('settings', document.querySelectorAll('.nav-btn')[0]);
     } else {
-        nav('live', document.querySelectorAll('.nav-btn:not(.admin-only)')[0]);
+        nav('live', document.querySelectorAll('.nav-btn:not(.admin-only)')[1]);
     }
 }
 
@@ -384,7 +456,7 @@ function nav(id, btn) {
     document.querySelectorAll('.section').forEach(e => e.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(e => e.classList.remove('active'));
     document.getElementById('sec-' + id).classList.add('active');
-    btn.classList.add('active');
+    if (btn) btn.classList.add('active');
     if (id === 'users') loadUsers();
     if (id === 'live') loadLiveAndErrors();
 }
@@ -478,6 +550,41 @@ async function uploadBackup() {
     } else {
         alert('Geri yükleme hatası.');
     }
+}
+
+async function generateImage() {
+    const prompt = document.getElementById('img_prompt').value.trim();
+    if (!prompt) return alert('Lütfen bir görsel açıklaması girin.');
+    const btn = document.getElementById('img_gen_btn');
+    const status = document.getElementById('img_status');
+    btn.disabled = true;
+    status.innerText = 'Görsel üretiliyor...';
+
+    const res = await apiFetch('/api/image/generate', 'POST', {
+        prompt,
+        width: parseInt(document.getElementById('img_width').value) || 1024,
+        height: parseInt(document.getElementById('img_height').value) || 1024
+    });
+    btn.disabled = false;
+    const data = await res.json();
+    if (res.ok && data.image_b64) {
+        lastGeneratedDataUrl = 'data:image/png;base64,' + data.image_b64;
+        const img = document.getElementById('img_output');
+        img.src = lastGeneratedDataUrl;
+        img.style.display = 'block';
+        document.getElementById('img_dl_btn').style.display = 'inline-block';
+        status.innerText = 'Görsel hazır! İndirip Roblox Studio Asset Manager üzerinden oyuna aktarabilirsiniz.';
+    } else {
+        status.innerText = 'Hata: ' + (data.detail || data.error || 'Görsel üretilemedi');
+    }
+}
+
+function downloadGeneratedImg() {
+    if (!lastGeneratedDataUrl) return;
+    const a = document.createElement('a');
+    a.href = lastGeneratedDataUrl;
+    a.download = `roblox_ui_asset_${Date.now()}.png`;
+    a.click();
 }
 
 async function loadLiveAndErrors() {
@@ -616,7 +723,7 @@ async def export_backup(client_key: str = Header(None)):
     users = [dict(u) for u in conn.execute("SELECT * FROM users").fetchall()]
     conn.close()
     return {
-        "backup_version": "3.0",
+        "backup_version": "4.0",
         "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg,
         "users": users
@@ -653,6 +760,55 @@ async def import_backup(request: Request, client_key: str = Header(None)):
     conn.commit()
     conn.close()
     return {"status": "restored"}
+
+# --- VENICE GÖRSEL / UI ASSET ÜRETİM API ---
+@app.post("/api/image/generate")
+async def generate_image_api(request: Request, client_key: str = Header(None)):
+    user = get_user_by_auth(client_key=client_key)
+    if user["role"] != "admin" and user["tokens"] < 1500:
+        raise HTTPException(status_code=402, detail="Görsel üretimi için yetersiz kredi (min 1500 Token).")
+
+    d = await request.json()
+    conn = get_db()
+    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
+    conn.close()
+
+    if not cfg["venice_key"]:
+        raise HTTPException(status_code=400, detail="Venice API anahtarı tanımlı değil.")
+
+    headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
+    body = {
+        "model": cfg.get("image_model") or "seedream-v5-5",
+        "prompt": d.get("prompt", ""),
+        "width": min(1280, max(512, int(d.get("width", 1024)))),
+        "height": min(1280, max(512, int(d.get("height", 1024)))),
+        "format": "png",
+        "hide_watermark": True
+    }
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post("https://api.venice.ai/api/v1/image/generate", json=body, headers=headers)
+        if r.status_code != 200:
+            ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"Venice Image HTTP {r.status_code}", "details": r.text})
+            raise HTTPException(status_code=400, detail=f"Görsel API Hatası ({r.status_code})")
+        resp_json = r.json()
+        images = resp_json.get("images", [])
+        if not images:
+            raise HTTPException(status_code=500, detail="Görsel yanıtı boş döndü.")
+
+    if user["role"] != "admin":
+        conn = get_db()
+        conn.execute("UPDATE users SET tokens = MAX(0, tokens - 1500) WHERE id = ?", (user["id"],))
+        conn.commit()
+        conn.close()
+
+    return {"image_b64": images[0]}
+
+# --- DOĞRUDAN TOOLBOX ARAMA ENDPOINTİ ---
+@app.get("/api/toolbox/search")
+async def api_toolbox_search(q: str, client_key: str = Header(None)):
+    get_user_by_auth(client_key=client_key)
+    return {"results": await search_roblox_toolbox(q, limit=8)}
 
 # --- ÖZETLEYİCİ MODEL (CODEBASE INDEXER) ---
 @app.post("/api/agent/summarize")
@@ -718,18 +874,49 @@ async def log_err(request: Request):
     ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": d.get("type", "Hata"), "details": d.get("details", "")})
     return {"status": "ok"}
 
-# --- ASENKRON ANA AJAN MOTORU (HAFIZA SİSTEMLİ) ---
+# --- ASENKRON ANA AJAN MOTORU (HAFIZA + SUNUCU TARAFLI TOOLBOX ARAMA DÖNGÜSÜ) ---
+async def stream_venice_call(cfg: dict, messages: list, task_id: str) -> str:
+    headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
+    venice_payload = {
+        "model": cfg["chat_model"],
+        "stream": True,
+        "messages": messages
+    }
+    collected = []
+    async with httpx.AsyncClient() as client:
+        async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
+            if response.status_code != 200:
+                err_txt = (await response.aread()).decode("utf-8", errors="ignore")
+                ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"Venice HTTP {response.status_code}", "details": err_txt})
+                raise RuntimeError(f"API Hatası ({response.status_code})")
+
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    content = chunk["choices"][0].get("delta", {}).get("content", "")
+                    if content:
+                        collected.append(content)
+                        buf = "".join(collected)[-2500:]
+                        TASKS[task_id]["buffer"] = buf
+                        LIVE_STATE["buffer"] = buf
+                except Exception:
+                    pass
+    return "".join(collected)
+
 async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
     conn = get_db()
     cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
-    
-    # Kullanıcının önceki hafıza kayıtlarını çek
+
     mem_records = conn.execute("SELECT prompt, ai_summary FROM memory_logs WHERE user_id = ? ORDER BY id DESC LIMIT 8", (user["id"],)).fetchall()
     conn.close()
 
     memory_list = [{"Kullanıcı_Talebi": r["prompt"], "Yaptığın_Düzenlemeler": r["ai_summary"]} for r in reversed(mem_records)]
-    
-    # Hafızayı ve yeni görevi birleştir
+
     enriched_payload = {
         "GECMIS_HAFIZA": memory_list,
         "YENI_GOREV": payload
@@ -739,67 +926,59 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         TASKS[task_id] = {"status": "failed", "error": "Yönetici henüz Venice API anahtarını girmemiş."}
         return
 
-    headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
-    venice_payload = {
-        "model": cfg["chat_model"],
-        "stream": True,
-        "messages": [
-            {"role": "system", "content": cfg["system_prompt"]},
-            {"role": "user", "content": json.dumps(enriched_payload, ensure_ascii=False)[:65000]}
-        ]
-    }
-
     LIVE_STATE["status"] = f"{user['username']} için üretiliyor..."
     LIVE_STATE["buffer"] = ""
-    collected = []
+
+    messages = [
+        {"role": "system", "content": cfg["system_prompt"]},
+        {"role": "user", "content": json.dumps(enriched_payload, ensure_ascii=False)[:65000]}
+    ]
 
     try:
-        async with httpx.AsyncClient() as client:
-            async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
-                if response.status_code != 200:
-                    err_txt = (await response.aread()).decode("utf-8", errors="ignore")
-                    ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"Venice HTTP {response.status_code}", "details": err_txt})
-                    TASKS[task_id] = {"status": "failed", "error": f"API Hatası ({response.status_code})"}
-                    LIVE_STATE["status"] = "Hata oluştu"
-                    return
+        total_out_tokens = 0
+        repaired_json = {}
 
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                        content = chunk["choices"][0].get("delta", {}).get("content", "")
-                        if content:
-                            collected.append(content)
-                            buf = "".join(collected)[-2500:]
-                            TASKS[task_id]["buffer"] = buf
-                            LIVE_STATE["buffer"] = buf
-                    except Exception:
-                        pass
+        # Sunucu içi Toolbox arama döngüsü (en fazla 2 tur)
+        for _turn in range(2):
+            full_output = await stream_venice_call(cfg, messages, task_id)
+            total_out_tokens += estimate_tokens(full_output)
+            repaired_json = extract_and_repair_json(full_output)
 
-        full_output = "".join(collected)
-        raw_out_tokens = estimate_tokens(full_output)
+            queries = repaired_json.get("search_toolbox") or []
+            if queries and isinstance(queries, list) and _turn == 0:
+                LIVE_STATE["status"] = f"Toolbox aranıyor: {', '.join(queries[:4])}"
+                TASKS[task_id]["buffer"] = f"Roblox Toolbox'ta 3D modeller aranıyor: {', '.join(queries[:4])}..."
+                toolbox_results = {}
+                for q in queries[:4]:
+                    toolbox_results[str(q)] = await search_roblox_toolbox(str(q), limit=6)
+
+                messages.append({"role": "assistant", "content": full_output})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "TOOLBOX_ARAMA_SONUCLARI:\n"
+                        + json.dumps(toolbox_results, ensure_ascii=False)
+                        + "\nŞimdi en uygun AssetId'leri seçerek `insert_asset` aksiyonlarını (ve gerekiyorsa `write_script` / `run_luau` aksiyonlarını) içeren nihai JSON yanıtını döndür. Tekrar search_toolbox çağırma."
+                    )
+                })
+                continue
+            break
 
         if user["role"] != "admin":
-            total_cost = int((raw_in_tokens * cfg["input_cost_mult"]) + (raw_out_tokens * cfg["output_cost_mult"]))
+            total_cost = int((raw_in_tokens * cfg["input_cost_mult"]) + (total_out_tokens * cfg["output_cost_mult"]))
             conn = get_db()
             conn.execute("UPDATE users SET tokens = MAX(0, tokens - ?) WHERE id = ?", (total_cost, user["id"]))
             conn.commit()
             conn.close()
 
-        repaired_json = extract_and_repair_json(full_output)
         actions = repaired_json.get("actions", [])
-        
-        # Başarılı işlemi hafızaya kaydet
+
         if not repaired_json.get("need_files"):
-            act_descs = [f"{a.get('type')}: {a.get('name') or a.get('path') or 'nesne'}" for a in actions]
+            act_descs = [f"{a.get('type')}: {a.get('name') or a.get('path') or a.get('asset_id') or 'nesne'}" for a in actions]
             ai_summary = repaired_json.get("thought", "Düzenlemeler yapıldı.")
             if act_descs:
                 ai_summary += " (Değişenler: " + ", ".join(act_descs) + ")"
-            
+
             conn = get_db()
             conn.execute("INSERT INTO memory_logs (user_id, prompt, ai_summary) VALUES (?, ?, ?)", (user["id"], payload.get("prompt", "")[:500], ai_summary[:1000]))
             conn.commit()
