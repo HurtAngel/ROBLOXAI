@@ -82,7 +82,7 @@ def build_full_state_snapshot() -> dict:
     memories = [dict(m) for m in conn.execute("SELECT * FROM memory_logs ORDER BY id DESC LIMIT 100").fetchall()]
     conn.close()
     return {
-        "backup_version": "4.2-director",
+        "backup_version": "4.3-director-fix",
         "synced_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg,
         "users": users,
@@ -202,17 +202,19 @@ def init_db():
             "  {\"thought\": \"Searching Roblox Toolbox for 3D models.\", \"search_toolbox\": [\"modern mansion\", \"sports car\"], \"actions\": []}\n"
             "- Once `TOOLBOX_ARAMA_SONUCLARI` arrives, place chosen models with `insert_asset` (`position`, `rotation`, `scale`, `strip_scripts: true`).\n\n"
             "3. BLENDER-STYLE DIRECTOR CAMERA & CUTSCENES (`create_cutscene` & `set_camera`):\n"
-            "- When the user wants a cinematic shot, movie sequence, flythrough, zoom-in, or characterless showcase (like Blender's Camera Timeline), use `create_cutscene`!\n"
+            "- When the user wants a cinematic shot, movie sequence, flythrough, zoom-in, or characterless showcase (like Blender's Camera Timeline), ALWAYS use `create_cutscene`!\n"
+            "- CRITICAL: When using `create_cutscene`, DO NOT write a separate manual camera `LocalScript` (the plugin automatically installs `AI_DirectorCameraPlayer` with `BindToRenderStep` priority).\n"
+            "- CRITICAL: Make sure `pos` and `look_at` coordinates in `keyframes` match the EXACT world coordinates where your 3D architecture/street is built (e.g., if a street runs along Z from -80 to +80 at Y=0..25, set camera `pos` at [0, 8, 65] and `look_at` at [0, 6, -40] so it looks straight through the street, NEVER into empty sky!).\n"
             "- Set `\"disable_character\": true` when no playable avatar should spawn (pure cinema mode).\n"
-            "- Define chronological `keyframes` with `time` (seconds), `pos` ([x,y,z]), `look_at` ([x,y,z]) OR dynamic `track_path` (e.g. \"Workspace.Ball\" or \"Workspace.Car\"), `fov` (e.g. 70 wide -> 30 dramatic zoom), `easing` (\"Linear|Sine|Quad|Cubic|Expo\"), and `shake` (0.0 to 2.0).\n"
+            "- Define chronological `keyframes` with `time` (seconds), `pos` ([x,y,z]), `look_at` ([x,y,z]) OR dynamic `track_path` (e.g. \"Workspace.Ball\"), `fov` (e.g. 70 wide -> 32 dramatic zoom), `easing` (\"Linear|Sine|Quad|Cubic|Expo\"), and `shake` (0.0 to 2.0).\n"
             "- Use `set_camera` to immediately frame the Studio Edit-Mode viewport camera onto a newly created build.\n\n"
-            "4. FUNCTIONAL COMPLETENESS & EDIT-MODE UI SAFETY:\n"
-            "- Always create both 3D/UI objects AND working Server `Script` + Client `LocalScript` files via `write_script`.\n"
+            "4. FUNCTIONAL COMPLETENESS, LOCAL SCRIPT PLACEMENT & EDIT-MODE UI SAFETY:\n"
+            "- NEVER set `parent` of a `LocalScript` to `\"StarterPlayer\"` (it will not execute there!). ALWAYS set `parent` of any `LocalScript` to `\"StarterPlayer.StarterPlayerScripts\"`.\n"
             "- Every `ScreenGui` created under `StarterGui` MUST have `\"Enabled\": false` in Edit Mode so it never blocks the viewport! Enable it at runtime inside your `LocalScript`.\n"
             "- If the user says a UI is blocking their screen, find it in `scene_hierarchy.StarterGui` and set `{\"Enabled\": false}` via `edit_instance`.\n\n"
             "5. 3D ARCHITECTURE, PHYSICS & RIG ANIMATIONS:\n"
             "- Use `run_luau` ONLY for Edit-Mode procedural construction. Put all runtime logic in `write_script`.\n"
-            "- Use `RunService.Heartbeat(dt)` instead of `while wait()`. Put `UserInputService` and camera logic strictly in `LocalScript`.\n"
+            "- Use `RunService.Heartbeat(dt)` instead of `while wait()`.\n"
             "- For Studio Animation Editor `KeyframeSequence` assets, use `create_animation` with chronological `keyframes` and `poses`.\n\n"
             "6. SUPPORTED JSON ACTION FORMATS:\n"
             "- {\"type\": \"create_instance\", \"class\": \"Part|ScreenGui|Frame|RemoteEvent\", \"name\": \"...\", \"parent\": \"Workspace|StarterGui|ReplicatedStorage\", \"properties\": {...}}\n"
@@ -221,7 +223,7 @@ def init_db():
             "- {\"type\": \"write_script\", \"script_type\": \"Script|LocalScript|ModuleScript\", \"name\": \"...\", \"parent\": \"ServerScriptService|StarterPlayer.StarterPlayerScripts|StarterGui|ReplicatedStorage\", \"source\": \"...\"}\n"
             "- {\"type\": \"edit_script\", \"path\": \"...\", \"source\": \"...\"}\n"
             "- {\"type\": \"create_animation\", \"name\": \"SwordSlash\", \"rig_path\": \"Workspace.Rig\", \"loop\": false, \"priority\": \"Action\", \"keyframes\": [{\"time\": 0.0, \"poses\": {\"RightUpperArm\": {\"pos\": [0,0,0], \"rot\": [-45,0,15], \"easing\": \"Cubic\"}}}]}\n"
-            "- {\"type\": \"create_cutscene\", \"name\": \"MainCutscene\", \"disable_character\": true, \"loop\": true, \"cinematic_bars\": true, \"keyframes\": [{\"time\": 0.0, \"pos\": [0,15,40], \"look_at\": [0,5,0], \"fov\": 70, \"easing\": \"Cubic\", \"shake\": 0}, {\"time\": 3.0, \"pos\": [12,8,15], \"track_path\": \"Workspace.Ball\", \"fov\": 35, \"easing\": \"Sine\", \"shake\": 0.4}]}\n"
+            "- {\"type\": \"create_cutscene\", \"name\": \"MainCutscene\", \"disable_character\": true, \"loop\": true, \"cinematic_bars\": true, \"keyframes\": [{\"time\": 0.0, \"pos\": [0,8,60], \"look_at\": [0,6,-20], \"fov\": 70, \"easing\": \"Cubic\", \"shake\": 0}, {\"time\": 5.0, \"pos\": [0,7,-10], \"look_at\": [0,6,-80], \"fov\": 35, \"easing\": \"Sine\", \"shake\": 0.15}]}\n"
             "- {\"type\": \"set_camera\", \"position\": [25,18,35], \"look_at\": [0,5,0], \"target_path\": \"\", \"fov\": 65}\n"
             "- {\"type\": \"insert_asset\", \"asset_id\": 123456, \"name\": \"...\", \"parent\": \"Workspace\", \"position\": [0,5,0], \"rotation\": [0,0,0], \"scale\": 1.0, \"strip_scripts\": true}\n"
             "- {\"type\": \"run_luau\", \"description\": \"...\", \"code\": \"...\"}\n"
@@ -356,7 +358,7 @@ async def web_portal():
         :root { --bg: #09090b; --surface: #121216; --border: #27272a; --accent: #3b82f6; --text: #f4f4f5; --muted: #a1a1aa; --danger: #ef4444; --success: #10b981; --amber: #f59e0b; }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
-        .sidebar { width: 275px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+        .sidebar { width: 275px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column: gap: 8px; }
         .sidebar h2 { font-size: 18px; font-weight: 700; margin-bottom: 14px; letter-spacing: -0.5px; }
         .profile-card { background: var(--bg); border: 1px solid var(--border); padding: 12px; border-radius: 8px; margin-bottom: 14px; font-size: 12px; }
         .key-box { background: #18181b; padding: 7px 9px; border-radius: 4px; font-family: monospace; color: var(--success); margin-top: 6px; word-break: break-all; cursor: pointer; border: 1px dashed var(--border); }
