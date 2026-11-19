@@ -17,9 +17,131 @@ except Exception:
 
 app = FastAPI()
 DB_FILE = "architect_v3.db"
+REDIS_CFG_FILE = "upstash_conn.json"
 TASKS = {}
 ERROR_LOGS = []
 LIVE_STATE = {"status": "Boşta", "buffer": "", "model": "openai-gpt-oss-120b"}
+
+DEFAULT_UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "https://selected-chamois-177802.upstash.io").strip()
+DEFAULT_UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "").strip()
+
+def get_upstash_creds() -> tuple[str, str]:
+    url = os.environ.get("UPSTASH_REDIS_REST_URL", "").strip()
+    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "").strip()
+    if os.path.exists(REDIS_CFG_FILE):
+        try:
+            with open(REDIS_CFG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                url = data.get("url", url).strip() or url
+                token = data.get("token", token).strip() or token
+        except Exception:
+            pass
+    return (url or DEFAULT_UPSTASH_URL), (token or DEFAULT_UPSTASH_TOKEN)
+
+def save_upstash_creds(url: str, token: str):
+    with open(REDIS_CFG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"url": url.strip(), "token": token.strip()}, f)
+
+def upstash_cmd_sync(command_args: list):
+    url, token = get_upstash_creds()
+    if not url or not token:
+        return None
+    try:
+        with httpx.Client(timeout=12.0) as client:
+            r = client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=command_args
+            )
+            if r.status_code == 200:
+                return r.json().get("result")
+    except Exception as e:
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Upstash Sync Hatası", "details": str(e)})
+    return None
+
+async def upstash_cmd_async(command_args: list):
+    url, token = get_upstash_creds()
+    if not url or not token:
+        raise ValueError("Upstash URL veya Token tanımlı değil.")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=command_args
+        )
+        if r.status_code != 200:
+            raise RuntimeError(f"Upstash HTTP {r.status_code}: {r.text}")
+        return r.json().get("result")
+
+def build_full_state_snapshot() -> dict:
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cfg_row = conn.execute("SELECT * FROM config WHERE id=1").fetchone()
+    cfg = dict(cfg_row) if cfg_row else {}
+    users = [dict(u) for u in conn.execute("SELECT * FROM users").fetchall()]
+    memories = [dict(m) for m in conn.execute("SELECT * FROM memory_logs ORDER BY id DESC LIMIT 100").fetchall()]
+    conn.close()
+    return {
+        "backup_version": "4.1-redis",
+        "synced_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "config": cfg,
+        "users": users,
+        "memory_logs": list(reversed(memories))
+    }
+
+def apply_full_state_snapshot(data: dict) -> bool:
+    if not isinstance(data, dict):
+        return False
+    conn = sqlite3.connect(DB_FILE)
+    if "config" in data and isinstance(data["config"], dict) and data["config"]:
+        c = data["config"]
+        conn.execute(
+            "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=? WHERE id=1",
+            (
+                c.get("venice_key", ""),
+                c.get("chat_model", "openai-gpt-oss-120b"),
+                c.get("summarizer_model", "google-gemma-3-27b-it"),
+                c.get("image_model", "seedream-v5-5"),
+                c.get("default_signup_tokens", 30000),
+                c.get("input_cost_mult", 1.0),
+                c.get("output_cost_mult", 2.0),
+                c.get("system_prompt", "")
+            )
+        )
+    if "users" in data and isinstance(data["users"], list) and len(data["users"]) > 0:
+        conn.execute("DELETE FROM users")
+        for u in data["users"]:
+            conn.execute(
+                "INSERT INTO users (id, username, password_hash, client_key, role, tokens) VALUES (?, ?, ?, ?, ?, ?)",
+                (u.get("id"), u["username"], u["password_hash"], u["client_key"], u["role"], u["tokens"])
+            )
+    if "memory_logs" in data and isinstance(data["memory_logs"], list):
+        conn.execute("DELETE FROM memory_logs")
+        for m in data["memory_logs"]:
+            conn.execute(
+                "INSERT INTO memory_logs (user_id, prompt, ai_summary, timestamp) VALUES (?, ?, ?, ?)",
+                (m.get("user_id", 1), m.get("prompt", ""), m.get("ai_summary", ""), m.get("timestamp", time.strftime("%Y-%m-%d %H:%M:%S")))
+            )
+    conn.commit()
+    conn.close()
+    return True
+
+async def auto_push_to_upstash():
+    url, token = get_upstash_creds()
+    if not url or not token:
+        return
+    try:
+        snapshot = build_full_state_snapshot()
+        await upstash_cmd_async(["SET", "ai_studio_v4_state", json.dumps(snapshot, ensure_ascii=False)])
+    except Exception as e:
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Upstash Oto-Kayıt Hatası", "details": str(e)})
+
+def trigger_bg_sync():
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(auto_push_to_upstash())
+    except Exception:
+        pass
 
 def hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode("utf-8")).hexdigest()
@@ -56,47 +178,45 @@ def init_db():
 
     c.execute("SELECT COUNT(*) FROM users WHERE username = 'Admin'")
     if c.fetchone()[0] == 0:
+        fixed_admin_key = os.environ.get("ADMIN_CLIENT_KEY", "").strip() or ("rbx-admin-" + uuid.uuid4().hex[:12])
         c.execute(
             "INSERT INTO users (username, password_hash, client_key, role, tokens) VALUES (?, ?, ?, ?, ?)",
-            ("Admin", hash_pw("1234"), "rbx-admin-" + uuid.uuid4().hex[:12], "admin", 999999999)
+            ("Admin", hash_pw("1234"), fixed_admin_key, "admin", 999999999)
         )
 
     c.execute("SELECT COUNT(*) FROM config")
     if c.fetchone()[0] == 0:
         default_prompt = (
-            "Sen Roblox Studio Baş Oyun Mimarı, 3D Fizik Mühendisi, Rig Animatörü ve Kıdemli Luau Geliştiricisisin.\n"
-            "Yanıtını SADECE geçerli, tek bir JSON nesnesi olarak döndür. Markdown blokları veya açıklama metni ekleme.\n\n"
-            "0. HAFIZA (GEÇMİŞ) VE ÇOK ADIMLI ARAÇ DÖNGÜSÜ:\n"
-            "- Sana gönderilen 'GECMIS_HAFIZA' ve 'scene_hierarchy' alanlarını incele. Kullanıcı 'bunu yavaşlat', 'UI gizle', 'şunu düzelt' derse hedefi buradan bul.\n"
-            "- Mevcut bir scripti düzenleyeceksen ve tam kaynak kodu henüz 'selected_items' veya 'requested_files_content' içinde yoksa tahmin etme! Önce şu JSON'u döndür:\n"
-            "  {\"thought\": \"Dosyayı okuyorum.\", \"need_files\": [\"Tam.Dosya.Yolu\"], \"actions\": []}\n"
-            "- Aynı dosyayı asla ikinci kez isteme; içerik geldiğinde doğrudan `edit_script` uygula.\n\n"
-            "1. GERÇEK 3D MODEL ARAMA (ROBLOX TOOLBOX):\n"
-            "- Kullanıcı gerçekçi 3D objeler (ev, malikane, araba, ağaç, silah, mobilya, stadyum vb.) istediğinde kutu yığmak yerine ÖNCE Roblox Toolbox'ta arama yapabilirsin.\n"
-            "- Arama yapmak için şu JSON'u döndür (sunucu sonuçları anında sana geri verecektir):\n"
-            "  {\"thought\": \"Roblox Toolbox'ta uygun 3D modelleri arıyorum.\", \"search_toolbox\": [\"modern mansion\", \"sports car\"], \"actions\": []}\n"
-            "- Sunucudan gerçek AssetId listesi geldiğinde `insert_asset` aksiyonuyla (position, rotation, scale, strip_scripts belirterek) modelleri sahneye yerleştir.\n"
-            "- `strip_scripts: true` seçeneği, indirilen hazır modellerin içindeki bozuk/virüslü eski scriptleri temizler; kendi temiz sürüş/mekanik scriptlerini yazacaksan `strip_scripts: true` kullan.\n\n"
-            "2. İŞLEVSELLİK VE UI GÖRÜNÜRLÜK KURALLARI (KRİTİK):\n"
-            "- Bir mekanik istendiğinde SADECE 3D parça koyup bırakma; mutlaka Server `Script` ve Client `LocalScript` dosyalarını `write_script` ile ekle.\n"
-            "- **EDIT MODE UI KURALI:** `StarterGui` altına oluşturduğun HER `ScreenGui` için `Enabled = false` ayarla ki geliştirici ekranında (Edit Mode) 3D sahneyi kapatmasın! Oyun başladığında (Play Mode) `LocalScript` içinden `screenGui.Enabled = true` yaparak aç (menü/mağaza panelleri `Visible = false` başlasın).\n"
-            "- Kullanıcı mevcut bir UI'ın ekranı kapattığını söylerse `scene_hierarchy` içindeki `StarterGui` elemanlarını bul ve `edit_instance` ile `Enabled = false` yap.\n\n"
-            "3. 3D MİMARİ VE FİZİK KURALLARI:\n"
-            "- Prosedürel bina/harita istendiğinde dev kutu yapma; `run_luau` ile çok parçalı prosedürel Luau kodu çalıştır.\n"
-            "- Klavye/Fare (`UserInputService`) ve kamera işlemleri DAİMA `LocalScript` olarak `StarterPlayer.StarterPlayerScripts` veya `StarterGui` altına yazılmalıdır.\n"
-            "- Döngülerde `while wait()` yerine `RunService.Heartbeat(dt)` kullan. Fırlatma/top fiziklerinde `ApplyImpulse` / `AssemblyLinearVelocity` kullan.\n\n"
-            "4. RİG VE ANİMASYON ÜRETİMİ (KEYFRAMESEQUENCE & MOTOR6D):\n"
-            "- Seçili Rig içindeki `Motor6D` eklem listesi (`RigJoints`) sana gönderilir.\n"
-            "- Gerçek Studio animasyonu (Animation Editor uyumlu) istendiğinde `create_animation` aksiyonunu kullan. Her keyframe içinde `time` (saniye) ve `poses` (Part1 adı -> `pos`: [x,y,z], `rot`: [rx,ry,rz] derece cinsinden, `easing`: \"Linear|Cubic|Elastic|Bounce\") tanımla.\n"
-            "- Anında oyun içinde oynatılacak prosedürel animasyon istenirse `write_script` ile `Motor6D.Transform` üzerinden `RunService.RenderStepped` veya `TweenService` kullan.\n\n"
-            "5. DESTEKLENEN AKSİYON FORMATLARI:\n"
-            "- {\"type\": \"create_instance\", \"class\": \"Part|ScreenGui|Frame\", \"name\": \"...\", \"parent\": \"Workspace|StarterGui\", \"properties\": {...}}\n"
+            "You are the Principal Roblox Studio Game Architect, 3D Physics Engineer, Rig Animator, and Senior Luau Systems Developer.\n"
+            "Your objective is NOT merely to place static blocks, but to engineer complete, 100% functional, bug-free, and immediately playable Roblox systems.\n"
+            "Return ONLY a single valid JSON object. NEVER wrap your response in markdown code fences or add extra text.\n\n"
+            "0. SESSION MEMORY & SCENE AWARENESS:\n"
+            "- Inspect `GECMIS_HAFIZA` and `scene_hierarchy` first. Resolve target paths from recent edits and the scene tree.\n"
+            "- Check `project_shortened_index` (`AI_SUMMARY`) to understand existing scripts.\n\n"
+            "1. MULTI-STEP AGENTIC FILE INSPECTION LOOP (`need_files`):\n"
+            "- When modifying an existing script whose full source code is NOT in `selected_items` or `requested_files_content`, DO NOT guess! Return:\n"
+            "  {\"thought\": \"Inspecting full source code of target scripts.\", \"need_files\": [\"Full.Service.Path\"], \"actions\": []}\n"
+            "- Never request the same file twice. Once delivered, apply `edit_script`.\n\n"
+            "2. REAL 3D MODEL SEARCH & PLACEMENT (`search_toolbox` + `insert_asset`):\n"
+            "- For realistic 3D models (mansions, cars, trees, weapons, props), search Roblox Toolbox first:\n"
+            "  {\"thought\": \"Searching Roblox Toolbox for 3D models.\", \"search_toolbox\": [\"modern mansion\", \"sports car\"], \"actions\": []}\n"
+            "- Once `TOOLBOX_ARAMA_SONUCLARI` arrives, place chosen models with `insert_asset` (`position`, `rotation`, `scale`, `strip_scripts: true`).\n\n"
+            "3. FUNCTIONAL COMPLETENESS & EDIT-MODE UI SAFETY:\n"
+            "- Always create both 3D/UI objects AND working Server `Script` + Client `LocalScript` files via `write_script`.\n"
+            "- Every `ScreenGui` created under `StarterGui` MUST have `\"Enabled\": false` in Edit Mode so it never blocks the viewport! Enable it at runtime inside your `LocalScript`.\n"
+            "- If the user says a UI is blocking their screen, find it in `scene_hierarchy.StarterGui` and set `{\"Enabled\": false}` via `edit_instance`.\n\n"
+            "4. 3D ARCHITECTURE, PHYSICS & RIG ANIMATIONS:\n"
+            "- Use `run_luau` ONLY for Edit-Mode procedural construction. Put all runtime logic in `write_script`.\n"
+            "- Use `RunService.Heartbeat(dt)` instead of `while wait()`. Put `UserInputService` and camera logic strictly in `LocalScript`.\n"
+            "- For Studio Animation Editor `KeyframeSequence` assets, use `create_animation` with chronological `keyframes` and `poses`.\n\n"
+            "5. SUPPORTED JSON ACTION FORMATS:\n"
+            "- {\"type\": \"create_instance\", \"class\": \"Part|ScreenGui|Frame|RemoteEvent\", \"name\": \"...\", \"parent\": \"Workspace|StarterGui|ReplicatedStorage\", \"properties\": {...}}\n"
             "- {\"type\": \"edit_instance\", \"path\": \"...\", \"properties\": {...}}\n"
             "- {\"type\": \"delete_instance\", \"path\": \"...\"}\n"
             "- {\"type\": \"write_script\", \"script_type\": \"Script|LocalScript|ModuleScript\", \"name\": \"...\", \"parent\": \"ServerScriptService|StarterPlayer.StarterPlayerScripts|StarterGui|ReplicatedStorage\", \"source\": \"...\"}\n"
             "- {\"type\": \"edit_script\", \"path\": \"...\", \"source\": \"...\"}\n"
-            "- {\"type\": \"create_animation\", \"name\": \"SwordSlash\", \"rig_path\": \"Workspace.Rig\", \"loop\": false, \"priority\": \"Action\", \"keyframes\": [{\"time\": 0.0, \"poses\": {\"RightUpperArm\": {\"pos\": [0,0,0], \"rot\": [-45,0,15], \"easing\": \"Cubic\"}}}, {\"time\": 0.25, \"poses\": {\"RightUpperArm\": {\"pos\": [0,0,0], \"rot\": [60,0,-20], \"easing\": \"Cubic\"}}}]}\n"
-            "- {\"type\": \"insert_asset\", \"asset_id\": 123456, \"name\": \"SportsCar\", \"parent\": \"Workspace\", \"position\": [0,5,0], \"rotation\": [0,90,0], \"scale\": 1.0, \"strip_scripts\": true}\n"
+            "- {\"type\": \"create_animation\", \"name\": \"SwordSlash\", \"rig_path\": \"Workspace.Rig\", \"loop\": false, \"priority\": \"Action\", \"keyframes\": [{\"time\": 0.0, \"poses\": {\"RightUpperArm\": {\"pos\": [0,0,0], \"rot\": [-45,0,15], \"easing\": \"Cubic\"}}}]}\n"
+            "- {\"type\": \"insert_asset\", \"asset_id\": 123456, \"name\": \"...\", \"parent\": \"Workspace\", \"position\": [0,5,0], \"rotation\": [0,0,0], \"scale\": 1.0, \"strip_scripts\": true}\n"
             "- {\"type\": \"run_luau\", \"description\": \"...\", \"code\": \"...\"}\n"
             "- {\"type\": \"terrain_fill\", \"material\": \"Grass\", \"position\": [0,0,0], \"size\": [100,10,100]}\n"
             "- {\"type\": \"create_plugin\", \"name\": \"...\", \"source\": \"...\"}"
@@ -107,6 +227,16 @@ def init_db():
         )
     conn.commit()
     conn.close()
+
+    # Deploy / Başlangıçta Upstash Redis üzerinde kayıtlı veritabanı varsa otomatik geri yükle
+    raw_state = upstash_cmd_sync(["GET", "ai_studio_v4_state"])
+    if raw_state:
+        try:
+            parsed_state = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
+            if apply_full_state_snapshot(parsed_state):
+                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve ayarlar başarıyla geri yüklendi.")
+        except Exception as e:
+            print(f"[Upstash Redis] Başlangıç geri yükleme hatası: {e}")
 
 init_db()
 
@@ -216,7 +346,7 @@ async def web_portal():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Studio V4 — Kontrol Merkezi</title>
     <style>
-        :root { --bg: #09090b; --surface: #121216; --border: #27272a; --accent: #3b82f6; --text: #f4f4f5; --muted: #a1a1aa; --danger: #ef4444; --success: #10b981; }
+        :root { --bg: #09090b; --surface: #121216; --border: #27272a; --accent: #3b82f6; --text: #f4f4f5; --muted: #a1a1aa; --danger: #ef4444; --success: #10b981; --amber: #f59e0b; }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
         .sidebar { width: 275px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 8px; }
@@ -237,6 +367,7 @@ async def web_portal():
         .btn:hover { opacity: 0.9; }
         .btn-danger { background: var(--danger); padding: 6px 10px; font-size: 11px; }
         .btn-success { background: var(--success); }
+        .btn-amber { background: var(--amber); color: #000; }
         .btn-sm { padding: 6px 12px; font-size: 12px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { padding: 11px; text-align: left; border-bottom: 1px solid var(--border); }
@@ -292,7 +423,7 @@ async def web_portal():
 
     <button class="nav-btn admin-only" onclick="nav('settings', this)">Sistem & Model Ayarları</button>
     <button class="nav-btn admin-only" onclick="nav('users', this)">Kullanıcı & Kredi Yönetimi</button>
-    <button class="nav-btn admin-only" onclick="nav('backup', this)">Yedekleme (JSON Export/Import)</button>
+    <button class="nav-btn admin-only" onclick="nav('backup', this)">Upstash Redis & Yedekleme</button>
     <button class="nav-btn" onclick="nav('images', this)">Görsel & UI Asset Üretici</button>
     <button class="nav-btn" onclick="nav('live', this)">Canlı Akış & Hata Kayıtları</button>
     <button class="nav-btn btn-danger" style="margin-top:auto; text-align:center;" onclick="logout()">Çıkış Yap</button>
@@ -316,7 +447,7 @@ async def web_portal():
             </div>
             <label>Evrensel Sistem Talimatı (System Prompt)</label>
             <textarea id="system_prompt" rows="12"></textarea>
-            <button class="btn" onclick="saveSettings()">Ayarları Kaydet</button>
+            <button class="btn" onclick="saveSettings()">Ayarları Kaydet (ve Upstash'e Eşitle)</button>
         </div>
     </div>
 
@@ -332,8 +463,47 @@ async def web_portal():
 
     <div id="sec-backup" class="section admin-only">
         <div class="card">
-            <h3>Tam Sistem Yedeği (Kullanıcılar, Modeller, Promptlar, Değişkenler)</h3>
-            <p style="font-size:13px; color:var(--muted); margin-bottom:16px;">Render sunucusu yeniden başlatıldığında verilerin kaybolmaması için tüm veritabanını JSON olarak indirebilir ve tek tıkla geri yükleyebilirsiniz.</p>
+            <h3>Upstash Redis Kalıcı Veritabanı Bağlantısı <span id="redis-badge" style="font-size:12px; color:var(--muted);"></span></h3>
+            <p style="font-size:13px; color:var(--muted); margin-bottom:14px;">Kullanıcılar, krediler, Client Key'ler ve sistem ayarları otomatik olarak Upstash Redis'e yazılır ve her Render deploy sonrasında buradan otomatik yüklenir.</p>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+                <div>
+                    <label>Upstash Redis REST URL</label>
+                    <input type="text" id="upstash_url" placeholder="https://selected-chamois-177802.upstash.io">
+                </div>
+                <div>
+                    <label>Upstash Redis REST Token</label>
+                    <input type="password" id="upstash_token" placeholder="Upstash REST Token yapıştırın">
+                </div>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+                <button class="btn" onclick="saveUpstashConfig()">💾 Bağlantıyı Kaydet</button>
+                <button class="btn btn-success" onclick="pushToUpstash()">⬆️ Verileri Upstash'e Yazdır (Force Push)</button>
+                <button class="btn btn-amber" onclick="pullFromUpstash()">⬇️ Upstash'ten Verileri Çek (Force Pull)</button>
+            </div>
+            <div class="log-box" id="redis-status-box" style="min-height:48px;">Durum bekleniyor...</div>
+        </div>
+
+        <div class="card">
+            <h3>Manuel Redis Anahtar / Veri Yazdırma & Çekme (SET / GET)</h3>
+            <div style="display:grid; grid-template-columns:1fr 2fr; gap:14px;">
+                <div>
+                    <label>Redis Key (Anahtar)</label>
+                    <input type="text" id="manual_redis_key" value="ai_studio_v4_state">
+                </div>
+                <div>
+                    <label>Redis Value (Değer - Yazdırmak için)</label>
+                    <input type="text" id="manual_redis_val" placeholder="Manuel yazılacak veri...">
+                </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:14px;">
+                <button class="btn btn-success" onclick="manualRedisSet()">📝 Manuel Veri Yazdır (SET)</button>
+                <button class="btn" onclick="manualRedisGet()">🔍 Manuel Veri Çek (GET)</button>
+            </div>
+            <div class="log-box" id="manual-redis-output" style="max-height:220px; overflow-y:auto;">Sonuç burada görünecek...</div>
+        </div>
+
+        <div class="card">
+            <h3>Yerel JSON Dosya Yedeği (Export / Import)</h3>
             <div style="display:flex; gap:12px; margin-bottom:20px;">
                 <button class="btn btn-success" onclick="downloadBackup()">⬇️ Tüm Veritabanını JSON İndir</button>
             </div>
@@ -436,6 +606,7 @@ function initSession(user) {
     if (user.role === 'admin') {
         document.querySelectorAll('.admin-only').forEach(e => e.style.display = 'block');
         loadSettings();
+        loadUpstashStatus();
         nav('settings', document.querySelectorAll('.nav-btn')[0]);
     } else {
         nav('live', document.querySelectorAll('.nav-btn:not(.admin-only)')[1]);
@@ -458,6 +629,7 @@ function nav(id, btn) {
     document.getElementById('sec-' + id).classList.add('active');
     if (btn) btn.classList.add('active');
     if (id === 'users') loadUsers();
+    if (id === 'backup') loadUpstashStatus();
     if (id === 'live') loadLiveAndErrors();
 }
 
@@ -492,7 +664,7 @@ async function saveSettings() {
         output_cost_mult: parseFloat(document.getElementById('output_cost_mult').value) || 2.0,
         system_prompt: document.getElementById('system_prompt').value
     });
-    alert('Ayarlar kaydedildi.');
+    alert('Ayarlar kaydedildi ve Upstash Redis ile eşitlendi.');
 }
 
 async function loadUsers() {
@@ -516,12 +688,91 @@ async function loadUsers() {
 async function updateTokens(id) {
     const val = parseInt(document.getElementById('tok-' + id).value);
     await apiFetch(`/api/admin/users/${id}/tokens`, 'POST', { tokens: val });
-    alert('Kredi güncellendi.');
+    alert('Kredi güncellendi ve Upstash Redis ile eşitlendi.');
 }
 
 async function delUser(id) {
     await apiFetch(`/api/admin/users/${id}`, 'DELETE');
     loadUsers();
+}
+
+// --- UPSTASH REDIS FONKSİYONLARI ---
+async function loadUpstashStatus() {
+    const res = await apiFetch('/api/admin/redis/status');
+    if (!res.ok) return;
+    const d = await res.json();
+    document.getElementById('upstash_url').value = d.url || '';
+    document.getElementById('upstash_token').value = d.token || '';
+    const badge = document.getElementById('redis-badge');
+    const box = document.getElementById('redis-status-box');
+    if (d.connected) {
+        badge.innerText = '● Bağlı (Aktif)';
+        badge.style.color = 'var(--success)';
+        box.innerText = `Upstash Redis bağlantısı aktif.\nSunucu Yanıtı: ${d.ping}\nKayıtlı Snapshot Mevcut: ${d.has_snapshot ? 'Evet' : 'Henüz Yok'}`;
+    } else {
+        badge.innerText = '● Bağlı Değil';
+        badge.style.color = 'var(--danger)';
+        box.innerText = `Bağlantı yok veya Token girilmedi: ${d.error || 'Token bekleniyor'}`;
+    }
+}
+
+async function saveUpstashConfig() {
+    const url = document.getElementById('upstash_url').value.trim();
+    const token = document.getElementById('upstash_token').value.trim();
+    const res = await apiFetch('/api/admin/redis/config', 'POST', { url, token });
+    const d = await res.json();
+    if (res.ok) {
+        alert('Upstash bağlantı bilgileri kaydedildi!');
+        loadUpstashStatus();
+    } else {
+        alert('Hata: ' + (d.detail || 'Kaydedilemedi'));
+    }
+}
+
+async function pushToUpstash() {
+    const box = document.getElementById('redis-status-box');
+    box.innerText = "Tüm veriler Upstash Redis'e yazdırılıyor...";
+    const res = await apiFetch('/api/admin/redis/push', 'POST');
+    const d = await res.json();
+    if (res.ok) {
+        box.innerText = `✅ Başarılı! ${d.users_count} kullanıcı, krediler ve ayarlar Upstash Redis'e yazdırıldı (${d.synced_at}).`;
+    } else {
+        box.innerText = `❌ Hata: ${d.detail || 'Yazdırma başarısız'}`;
+    }
+}
+
+async function pullFromUpstash() {
+    const box = document.getElementById('redis-status-box');
+    box.innerText = "Upstash Redis'ten veriler çekiliyor...";
+    const res = await apiFetch('/api/admin/redis/pull', 'POST');
+    const d = await res.json();
+    if (res.ok) {
+        box.innerText = `✅ Başarılı! ${d.users_count} kullanıcı ve ayarlar geri yüklendi. Sayfa yenileniyor...`;
+        setTimeout(() => location.reload(), 1000);
+    } else {
+        box.innerText = `❌ Hata: ${d.detail || 'Veri çekme başarısız'}`;
+    }
+}
+
+async function manualRedisSet() {
+    const key = document.getElementById('manual_redis_key').value.trim();
+    const value = document.getElementById('manual_redis_val').value;
+    if (!key) return alert('Anahtar (Key) zorunludur.');
+    const res = await apiFetch('/api/admin/redis/manual', 'POST', { action: 'set', key, value });
+    const d = await res.json();
+    document.getElementById('manual-redis-output').innerText = res.ok
+        ? `✅ SET [${key}] -> ${JSON.stringify(d.result)}`
+        : `❌ Hata: ${d.detail}`;
+}
+
+async function manualRedisGet() {
+    const key = document.getElementById('manual_redis_key').value.trim();
+    if (!key) return alert('Anahtar (Key) zorunludur.');
+    const res = await apiFetch('/api/admin/redis/manual', 'POST', { action: 'get', key });
+    const d = await res.json();
+    document.getElementById('manual-redis-output').innerText = res.ok
+        ? `🔍 GET [${key}]:\n${typeof d.result === 'string' ? d.result : JSON.stringify(d.result, null, 2)}`
+        : `❌ Hata: ${d.detail}`;
 }
 
 async function downloadBackup() {
@@ -545,7 +796,7 @@ async function uploadBackup() {
     try { parsed = JSON.parse(text); } catch { return alert('Geçersiz JSON dosyası.'); }
     const res = await apiFetch('/api/admin/backup/import', 'POST', parsed);
     if (res.ok) {
-        alert('Yedek başarıyla geri yüklendi! Sayfa yenileniyor...');
+        alert('Yedek başarıyla geri yüklendi ve Upstash Redis ile eşitlendi! Sayfa yenileniyor...');
         location.reload();
     } else {
         alert('Geri yükleme hatası.');
@@ -641,6 +892,7 @@ async def register(request: Request):
         conn.close()
         raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten mevcut.")
     conn.close()
+    trigger_bg_sync()
     return {"username": username, "role": "user", "tokens": start_tokens, "client_key": new_key}
 
 @app.get("/api/auth/me")
@@ -671,6 +923,7 @@ async def save_conf(request: Request, client_key: str = Header(None)):
     conn.commit()
     conn.close()
     LIVE_STATE["model"] = d["chat_model"]
+    trigger_bg_sync()
     return {"status": "ok"}
 
 @app.get("/api/admin/users")
@@ -691,6 +944,7 @@ async def update_user_tokens(user_id: int, request: Request, client_key: str = H
     conn.execute("UPDATE users SET tokens=? WHERE id=?", (d["tokens"], user_id))
     conn.commit()
     conn.close()
+    trigger_bg_sync()
     return {"status": "ok"}
 
 @app.delete("/api/admin/users/{user_id}")
@@ -701,7 +955,101 @@ async def delete_user(user_id: int, client_key: str = Header(None)):
     conn.execute("DELETE FROM users WHERE id=? AND role != 'admin'", (user_id,))
     conn.commit()
     conn.close()
+    trigger_bg_sync()
     return {"status": "ok"}
+
+# --- UPSTASH REDIS YÖNETİM & MANUEL VERİ YAZDIRMA/ÇEKME API ---
+@app.get("/api/admin/redis/status")
+async def redis_status(client_key: str = Header(None)):
+    if get_user_by_auth(client_key=client_key)["role"] != "admin":
+        raise HTTPException(status_code=403)
+    url, token = get_upstash_creds()
+    if not url or not token:
+        return {"connected": False, "url": url, "token": "", "error": "Upstash Token henüz girilmemiş."}
+    try:
+        ping_res = await upstash_cmd_async(["PING"])
+        exists_res = await upstash_cmd_async(["EXISTS", "ai_studio_v4_state"])
+        return {
+            "connected": True,
+            "url": url,
+            "token": token,
+            "ping": ping_res,
+            "has_snapshot": bool(exists_res)
+        }
+    except Exception as e:
+        return {"connected": False, "url": url, "token": token, "error": str(e)}
+
+@app.post("/api/admin/redis/config")
+async def redis_save_config(request: Request, client_key: str = Header(None)):
+    if get_user_by_auth(client_key=client_key)["role"] != "admin":
+        raise HTTPException(status_code=403)
+    d = await request.json()
+    url = (d.get("url") or "").strip()
+    token = (d.get("token") or "").strip()
+    if not url or not token:
+        raise HTTPException(status_code=400, detail="Upstash URL ve Token alanları boş olamaz.")
+    save_upstash_creds(url, token)
+    try:
+        await upstash_cmd_async(["PING"])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Bağlantı testi başarısız: {str(e)}")
+    return {"status": "connected"}
+
+@app.post("/api/admin/redis/push")
+async def redis_force_push(client_key: str = Header(None)):
+    if get_user_by_auth(client_key=client_key)["role"] != "admin":
+        raise HTTPException(status_code=403)
+    try:
+        snapshot = build_full_state_snapshot()
+        await upstash_cmd_async(["SET", "ai_studio_v4_state", json.dumps(snapshot, ensure_ascii=False)])
+        return {"status": "pushed", "users_count": len(snapshot["users"]), "synced_at": snapshot["synced_at"]}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/admin/redis/pull")
+async def redis_force_pull(client_key: str = Header(None)):
+    if get_user_by_auth(client_key=client_key)["role"] != "admin":
+        raise HTTPException(status_code=403)
+    try:
+        raw_state = await upstash_cmd_async(["GET", "ai_studio_v4_state"])
+        if not raw_state:
+            raise HTTPException(status_code=404, detail="Upstash Redis içinde henüz kayıtlı veri bulunamadı.")
+        parsed = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
+        apply_full_state_snapshot(parsed)
+        return {"status": "pulled", "users_count": len(parsed.get("users", []))}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/admin/redis/manual")
+async def redis_manual_op(request: Request, client_key: str = Header(None)):
+    if get_user_by_auth(client_key=client_key)["role"] != "admin":
+        raise HTTPException(status_code=403)
+    d = await request.json()
+    action = d.get("action")
+    key = (d.get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Key zorunludur.")
+    try:
+        if action == "set":
+            val = d.get("value", "")
+            res = await upstash_cmd_async(["SET", key, val])
+            if key == "ai_studio_v4_state":
+                try:
+                    apply_full_state_snapshot(json.loads(val))
+                except Exception:
+                    pass
+            return {"status": "ok", "result": res}
+        elif action == "get":
+            res = await upstash_cmd_async(["GET", key])
+            return {"status": "ok", "result": res}
+        else:
+            raise HTTPException(status_code=400, detail="Geçersiz işlem.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # --- HAFIZA TEMİZLEME API ---
 @app.delete("/api/agent/memory")
@@ -711,6 +1059,7 @@ async def clear_memory(client_key: str = Header(None)):
     conn.execute("DELETE FROM memory_logs WHERE user_id=?", (user["id"],))
     conn.commit()
     conn.close()
+    trigger_bg_sync()
     return {"status": "ok"}
 
 # --- TAM JSON YEDEKLEME (EXPORT / IMPORT) ---
@@ -718,47 +1067,17 @@ async def clear_memory(client_key: str = Header(None)):
 async def export_backup(client_key: str = Header(None)):
     if get_user_by_auth(client_key=client_key)["role"] != "admin":
         raise HTTPException(status_code=403)
-    conn = get_db()
-    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
-    users = [dict(u) for u in conn.execute("SELECT * FROM users").fetchall()]
-    conn.close()
-    return {
-        "backup_version": "4.0",
-        "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "config": cfg,
-        "users": users
-    }
+    snap = build_full_state_snapshot()
+    snap["exported_at"] = snap["synced_at"]
+    return snap
 
 @app.post("/api/admin/backup/import")
 async def import_backup(request: Request, client_key: str = Header(None)):
     if get_user_by_auth(client_key=client_key)["role"] != "admin":
         raise HTTPException(status_code=403)
     data = await request.json()
-    conn = get_db()
-    if "config" in data and isinstance(data["config"], dict):
-        c = data["config"]
-        conn.execute(
-            "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=? WHERE id=1",
-            (
-                c.get("venice_key", ""),
-                c.get("chat_model", "openai-gpt-oss-120b"),
-                c.get("summarizer_model", "google-gemma-3-27b-it"),
-                c.get("image_model", "seedream-v5-5"),
-                c.get("default_signup_tokens", 30000),
-                c.get("input_cost_mult", 1.0),
-                c.get("output_cost_mult", 2.0),
-                c.get("system_prompt", "")
-            )
-        )
-    if "users" in data and isinstance(data["users"], list):
-        conn.execute("DELETE FROM users")
-        for u in data["users"]:
-            conn.execute(
-                "INSERT INTO users (username, password_hash, client_key, role, tokens) VALUES (?, ?, ?, ?, ?)",
-                (u["username"], u["password_hash"], u["client_key"], u["role"], u["tokens"])
-            )
-    conn.commit()
-    conn.close()
+    apply_full_state_snapshot(data)
+    trigger_bg_sync()
     return {"status": "restored"}
 
 # --- VENICE GÖRSEL / UI ASSET ÜRETİM API ---
@@ -801,6 +1120,7 @@ async def generate_image_api(request: Request, client_key: str = Header(None)):
         conn.execute("UPDATE users SET tokens = MAX(0, tokens - 1500) WHERE id = ?", (user["id"],))
         conn.commit()
         conn.close()
+        trigger_bg_sync()
 
     return {"image_b64": images[0]}
 
@@ -854,6 +1174,7 @@ async def summarize_scripts(request: Request, client_key: str = Header(None)):
         conn.execute("UPDATE users SET tokens = MAX(0, tokens - ?) WHERE id = ?", (cost, user["id"]))
         conn.commit()
         conn.close()
+        trigger_bg_sync()
 
     return {"summaries": parsed.get("summaries", {})}
 
@@ -938,7 +1259,6 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         total_out_tokens = 0
         repaired_json = {}
 
-        # Sunucu içi Toolbox arama döngüsü (en fazla 2 tur)
         for _turn in range(2):
             full_output = await stream_venice_call(cfg, messages, task_id)
             total_out_tokens += estimate_tokens(full_output)
@@ -983,6 +1303,8 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             conn.execute("INSERT INTO memory_logs (user_id, prompt, ai_summary) VALUES (?, ?, ?)", (user["id"], payload.get("prompt", "")[:500], ai_summary[:1000]))
             conn.commit()
             conn.close()
+
+        trigger_bg_sync()
 
         if len(actions) == 1 and actions[0].get("type") == "fallback_code":
             selected = payload.get("selected_items", [])
