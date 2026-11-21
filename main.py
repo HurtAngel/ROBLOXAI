@@ -1524,6 +1524,8 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     "- Aşama 1/3 (Yapılar & Resmi Rigler) ve Aşama 2/3 (Animasyonlar, Cutscene & Blur/Post-FX) sahnede hazır.\n"
                     "- Bu aşamada SADECE `write_script` ve `edit_script` (gerekirse `RemoteEvent` için `create_instance`) üret.\n"
                     "- `LocalScript`leri her zaman `StarterPlayer.StarterPlayerScripts` içine koy.\n"
+                    "- `create_animation` ile üretilen `KeyframeSequence`ler `ReplicatedStorage.AI_Animations` altındadır. Bunları oynatırken MUTLAKA `local hashId = game:GetService('KeyframeSequenceProvider'):RegisterKeyframeSequence(keyframeSeq); local anim = Instance.new('Animation'); anim.AnimationId = hashId; animator:LoadAnimation(anim):Play()` köprüsünü kullan.\n"
+                    "- Animasyon `Workspace` içindeki bir NPC üzerinde oynayacaksa `LocalScript` yerine MUTLAKA `ServerScriptService` içinde Sunucu `Script`i ile oynat.\n"
                     "- Eğer Aşama 2/3'te `create_cutscene` kullanılmadıysa ve kamera/aksiyon gerekiyorsa, dinamik FOV/POV geçişleri ve `Lighting.BlurEffect` / `DepthOfFieldEffect` animasyonları yapan temiz bir kamera `LocalScript`i yaz (eğer `create_cutscene` zaten kullanıldıysa kamera `LocalScript`i yazma, sadece FOV/Blur/etkileşim/oyun mantığı scriptlerini yaz).\n"
                     "- Aşama 1/3 yapılarını veya Aşama 2/3 animasyonlarını tekrar üretme ya da silme."
                 )
