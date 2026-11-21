@@ -1,0 +1,1320 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+	<External>null</External>
+	<External>nil</External>
+	<Item class="Script" referent="RBX3D2FD430CF954A3795A1B1A7A3C5FABC">
+		<Properties>
+			<ProtectedString name="Source"><![CDATA[local HttpService = game:GetService("HttpService")
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local Selection = game:GetService("Selection")
+local ServerStorage = game:GetService("ServerStorage")
+local StarterGui = game:GetService("StarterGui")
+local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterPlayer = game:GetService("StarterPlayer")
+local Players = game:GetService("Players")
+local LogService = game:GetService("LogService")
+local ScriptEditorService = game:GetService("ScriptEditorService")
+local TextService = game:GetService("TextService")
+
+local DEFAULT_URL = "https://robloxai-1ea7.onrender.com"
+
+local toolbar = plugin:CreateToolbar("AI Studio V4")
+local toggleBtn = toolbar:CreateButton("AI Architect V4", "Otonom Oyun, 3D Toolbox, UI ve Rig Animasyon Mimarı", "rbxassetid://15088716335")
+
+local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, true, true, 430, 760, 360, 520)
+local widget = plugin:CreateDockWidgetPluginGui("AIStudioV4Widget", widgetInfo)
+widget.Title = "AI Studio V4"
+widget.Enabled = true
+
+local C = {
+	BG = Color3.fromRGB(12, 12, 15),
+	CARD = Color3.fromRGB(22, 22, 27),
+	INPUT = Color3.fromRGB(9, 9, 11),
+	ACCENT = Color3.fromRGB(59, 130, 246),
+	GREEN = Color3.fromRGB(16, 185, 129),
+	RED = Color3.fromRGB(239, 68, 68),
+	AMBER = Color3.fromRGB(245, 158, 11),
+	PURPLE = Color3.fromRGB(139, 92, 246),
+	TEXT = Color3.fromRGB(244, 244, 245),
+	MUTED = Color3.fromRGB(161, 161, 170),
+	BORDER = Color3.fromRGB(39, 39, 42)
+}
+
+local root = Instance.new("ScrollingFrame")
+root.Size = UDim2.new(1, 0, 1, 0)
+root.CanvasSize = UDim2.new(0, 0, 0, 0)
+root.AutomaticCanvasSize = Enum.AutomaticSize.Y
+root.ScrollBarThickness = 5
+root.BackgroundColor3 = C.BG
+root.BorderSizePixel = 0
+root.Parent = widget
+
+local pad = Instance.new("UIPadding")
+pad.PaddingTop = UDim.new(0, 12)
+pad.PaddingBottom = UDim.new(0, 18)
+pad.PaddingLeft = UDim.new(0, 12)
+pad.PaddingRight = UDim.new(0, 12)
+pad.Parent = root
+
+local layout = Instance.new("UIListLayout")
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, 8)
+layout.Parent = root
+
+local function styleBox(obj, r)
+	local cr = Instance.new("UICorner")
+	cr.CornerRadius = UDim.new(0, r or 6)
+	cr.Parent = obj
+	local st = Instance.new("UIStroke")
+	st.Color = C.BORDER
+	st.Parent = obj
+end
+
+local function makeLabel(txt, order)
+	local l = Instance.new("TextLabel")
+	l.LayoutOrder = order
+	l.Size = UDim2.new(1, 0, 0, 16)
+	l.BackgroundTransparency = 1
+	l.Text = txt
+	l.TextColor3 = C.MUTED
+	l.Font = Enum.Font.GothamBold
+	l.TextSize = 11
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.Parent = root
+	return l
+end
+
+-- 1. HESAP & API KEY
+makeLabel("HESAP & CLIENT API KEY", 1)
+
+local authRow = Instance.new("Frame")
+authRow.LayoutOrder = 2
+authRow.Size = UDim2.new(1, 0, 0, 34)
+authRow.BackgroundTransparency = 1
+authRow.Parent = root
+
+local keyInput = Instance.new("TextBox")
+keyInput.Size = UDim2.new(0.70, 0, 1, 0)
+keyInput.BackgroundColor3 = C.INPUT
+keyInput.Text = plugin:GetSetting("V3_ClientKey") or ""
+keyInput.PlaceholderText = "Client API Key yapıştırın..."
+keyInput.TextColor3 = C.TEXT
+keyInput.PlaceholderColor3 = C.MUTED
+keyInput.Font = Enum.Font.Code
+keyInput.TextSize = 11
+keyInput.ClearTextOnFocus = false
+keyInput.Parent = authRow
+styleBox(keyInput)
+
+local verifyBtn = Instance.new("TextButton")
+verifyBtn.Size = UDim2.new(0.28, 0, 1, 0)
+verifyBtn.Position = UDim2.new(0.72, 0, 0, 0)
+verifyBtn.BackgroundColor3 = C.CARD
+verifyBtn.Text = "Doğrula"
+verifyBtn.TextColor3 = C.TEXT
+verifyBtn.Font = Enum.Font.GothamBold
+verifyBtn.TextSize = 11
+verifyBtn.Parent = authRow
+styleBox(verifyBtn)
+
+local accountBadge = Instance.new("TextLabel")
+accountBadge.LayoutOrder = 3
+accountBadge.Size = UDim2.new(1, 0, 0, 26)
+accountBadge.BackgroundColor3 = C.CARD
+accountBadge.Text = "  Hesap: Doğrulanmadı"
+accountBadge.TextColor3 = C.MUTED
+accountBadge.Font = Enum.Font.GothamSemibold
+accountBadge.TextSize = 11
+accountBadge.TextXAlignment = Enum.TextXAlignment.Left
+accountBadge.Parent = root
+styleBox(accountBadge)
+
+-- 2. DÜŞÜNME MODU & AUTO MODE KONTROLLERİ
+makeLabel("ÜRETİM MODU & KALİTE KURALLARI", 4)
+
+local modeRow = Instance.new("Frame")
+modeRow.LayoutOrder = 5
+modeRow.Size = UDim2.new(1, 0, 0, 32)
+modeRow.BackgroundTransparency = 1
+modeRow.Parent = root
+
+local thinkingMode = false
+local autoMode = true
+local manualRules = {
+	req_anim = true,
+	req_cam = true,
+	req_vfx = true,
+	req_weapon = false
+}
+
+local thinkBtn = Instance.new("TextButton")
+thinkBtn.Size = UDim2.new(0.49, 0, 1, 0)
+thinkBtn.BackgroundColor3 = C.CARD
+thinkBtn.Text = "⚡ Düşünme: Kapalı"
+thinkBtn.TextColor3 = C.AMBER
+thinkBtn.Font = Enum.Font.GothamBold
+thinkBtn.TextSize = 11
+thinkBtn.Parent = modeRow
+styleBox(thinkBtn)
+
+local autoBtn = Instance.new("TextButton")
+autoBtn.Size = UDim2.new(0.49, 0, 1, 0)
+autoBtn.Position = UDim2.new(0.51, 0, 0, 0)
+autoBtn.BackgroundColor3 = C.CARD
+autoBtn.Text = "🤖 Auto Mode: Açık"
+autoBtn.TextColor3 = C.GREEN
+autoBtn.Font = Enum.Font.GothamBold
+autoBtn.TextSize = 11
+autoBtn.Parent = modeRow
+styleBox(autoBtn)
+
+local rulesPanel = Instance.new("Frame")
+rulesPanel.LayoutOrder = 6
+rulesPanel.Size = UDim2.new(1, 0, 0, 118)
+rulesPanel.BackgroundColor3 = C.CARD
+rulesPanel.Visible = false
+rulesPanel.Parent = root
+styleBox(rulesPanel)
+
+local rPad = Instance.new("UIPadding")
+rPad.PaddingTop = UDim.new(0, 6)
+rPad.PaddingBottom = UDim.new(0, 6)
+rPad.PaddingLeft = UDim.new(0, 8)
+rPad.PaddingRight = UDim.new(0, 8)
+rPad.Parent = rulesPanel
+
+local rLayout = Instance.new("UIListLayout")
+rLayout.Padding = UDim.new(0, 4)
+rLayout.Parent = rulesPanel
+
+local function makeRuleCheckbox(key, labelTxt)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, 0, 0, 23)
+	b.BackgroundTransparency = 1
+	b.Font = Enum.Font.GothamSemibold
+	b.TextSize = 11
+	b.TextXAlignment = Enum.TextXAlignment.Left
+	b.Parent = rulesPanel
+	local function refresh()
+		b.Text = (manualRules[key] and "☑ " or "☐ ") .. labelTxt
+		b.TextColor3 = manualRules[key] and C.GREEN or C.MUTED
+	end
+	refresh()
+	b.MouseButton1Click:Connect(function()
+		manualRules[key] = not manualRules[key]
+		refresh()
+	end)
+end
+
+makeRuleCheckbox("req_anim", "Zorunlu Karakter Animasyonu (Motor6D)")
+makeRuleCheckbox("req_cam", "3. Şahıs Aksiyon Kamerası (FOV + Sarsıntı)")
+makeRuleCheckbox("req_vfx", "Gerçek VFX & Trail (Kutu/Part Yasağı)")
+makeRuleCheckbox("req_weapon", "Detaylı Silah / Ekipman Rig'i")
+
+thinkBtn.MouseButton1Click:Connect(function()
+	thinkingMode = not thinkingMode
+	thinkBtn.Text = thinkingMode and "🧠 Düşünme: Açık" or "⚡ Düşünme: Kapalı"
+	thinkBtn.TextColor3 = thinkingMode and C.PURPLE or C.AMBER
+end)
+
+autoBtn.MouseButton1Click:Connect(function()
+	autoMode = not autoMode
+	autoBtn.Text = autoMode and "🤖 Auto Mode: Açık" or "🛠️ Auto Mode: Kapalı"
+	autoBtn.TextColor3 = autoMode and C.GREEN or C.MUTED
+	rulesPanel.Visible = not autoMode
+end)
+
+-- 3. KOD İNDEKSLEME & HATA YAKALAYICI
+makeLabel("PROJE İNDEKSİ & HATA YAKALAYICI", 7)
+
+local indexRow = Instance.new("Frame")
+indexRow.LayoutOrder = 8
+indexRow.Size = UDim2.new(1, 0, 0, 32)
+indexRow.BackgroundTransparency = 1
+indexRow.Parent = root
+
+local readIndexChecked = true
+local checkBtn = Instance.new("TextButton")
+checkBtn.Size = UDim2.new(0.62, 0, 1, 0)
+checkBtn.BackgroundColor3 = C.CARD
+checkBtn.Text = "  ☑ Proje Özetlerini Oku"
+checkBtn.TextColor3 = C.GREEN
+checkBtn.Font = Enum.Font.GothamSemibold
+checkBtn.TextSize = 11
+checkBtn.TextXAlignment = Enum.TextXAlignment.Left
+checkBtn.Parent = indexRow
+styleBox(checkBtn)
+
+local indexNowBtn = Instance.new("TextButton")
+indexNowBtn.Size = UDim2.new(0.36, 0, 1, 0)
+indexNowBtn.Position = UDim2.new(0.64, 0, 0, 0)
+indexNowBtn.BackgroundColor3 = C.CARD
+indexNowBtn.Text = "İndeks Çıkar"
+indexNowBtn.TextColor3 = C.ACCENT
+indexNowBtn.Font = Enum.Font.GothamBold
+indexNowBtn.TextSize = 11
+indexNowBtn.Parent = indexRow
+styleBox(indexNowBtn)
+
+checkBtn.MouseButton1Click:Connect(function()
+	readIndexChecked = not readIndexChecked
+	checkBtn.Text = readIndexChecked and "  ☑ Proje Özetlerini Oku" or "  ☐ Proje Özetlerini Oku"
+	checkBtn.TextColor3 = readIndexChecked and C.GREEN or C.MUTED
+end)
+
+local fixErrBtn = Instance.new("TextButton")
+fixErrBtn.LayoutOrder = 9
+fixErrBtn.Size = UDim2.new(1, 0, 0, 28)
+fixErrBtn.BackgroundColor3 = C.CARD
+fixErrBtn.Text = "Output Hatalarını AI'ya Gönder ve Düzelt (0 Hata)"
+fixErrBtn.TextColor3 = C.MUTED
+fixErrBtn.Font = Enum.Font.GothamSemibold
+fixErrBtn.TextSize = 11
+fixErrBtn.Parent = root
+styleBox(fixErrBtn)
+
+local selectionBadge = Instance.new("TextLabel")
+selectionBadge.LayoutOrder = 10
+selectionBadge.Size = UDim2.new(1, 0, 0, 22)
+selectionBadge.BackgroundTransparency = 1
+selectionBadge.Text = "Seçili Nesne: 0"
+selectionBadge.TextColor3 = C.GREEN
+selectionBadge.Font = Enum.Font.GothamBold
+selectionBadge.TextSize = 11
+selectionBadge.TextXAlignment = Enum.TextXAlignment.Left
+selectionBadge.Parent = root
+
+-- 4. GERÇEK KAYDIRILABİLİR KOMUT KUTUSU (GETTEXTSIZE İLE 5K+ KARAKTER TAM GÖRÜNÜR)
+local promptHeader = Instance.new("Frame")
+promptHeader.LayoutOrder = 11
+promptHeader.Size = UDim2.new(1, 0, 0, 16)
+promptHeader.BackgroundTransparency = 1
+promptHeader.Parent = root
+
+local promptTitle = Instance.new("TextLabel")
+promptTitle.Size = UDim2.new(0.70, 0, 1, 0)
+promptTitle.BackgroundTransparency = 1
+promptTitle.Text = "KOMUT (3D, SCRİPT, UI, ANİMASYON, KAMERA)"
+promptTitle.TextColor3 = C.MUTED
+promptTitle.Font = Enum.Font.GothamBold
+promptTitle.TextSize = 11
+promptTitle.TextXAlignment = Enum.TextXAlignment.Left
+promptTitle.Parent = promptHeader
+
+local charCountLabel = Instance.new("TextLabel")
+charCountLabel.Size = UDim2.new(0.30, 0, 1, 0)
+charCountLabel.Position = UDim2.new(0.70, 0, 0, 0)
+charCountLabel.BackgroundTransparency = 1
+charCountLabel.Text = "0 karakter"
+charCountLabel.TextColor3 = C.ACCENT
+charCountLabel.Font = Enum.Font.Code
+charCountLabel.TextSize = 11
+charCountLabel.TextXAlignment = Enum.TextXAlignment.Right
+charCountLabel.Parent = promptHeader
+
+local promptScroll = Instance.new("ScrollingFrame")
+promptScroll.LayoutOrder = 12
+promptScroll.Size = UDim2.new(1, 0, 0, 180)
+promptScroll.BackgroundColor3 = C.INPUT
+promptScroll.BorderSizePixel = 0
+promptScroll.ScrollBarThickness = 6
+promptScroll.CanvasSize = UDim2.new(0, 0, 0, 180)
+promptScroll.Parent = root
+styleBox(promptScroll)
+
+local promptBox = Instance.new("TextBox")
+promptBox.Size = UDim2.new(1, -10, 0, 180)
+promptBox.BackgroundTransparency = 1
+promptBox.Text = ""
+promptBox.PlaceholderText = "Ne yapmak istiyorsunuz? (Uzun metinler otomatik aşağı kaydırılır)"
+promptBox.TextColor3 = C.TEXT
+promptBox.PlaceholderColor3 = C.MUTED
+promptBox.Font = Enum.Font.Gotham
+promptBox.TextSize = 12
+promptBox.TextWrapped = true
+promptBox.MultiLine = true
+promptBox.TextXAlignment = Enum.TextXAlignment.Left
+promptBox.TextYAlignment = Enum.TextYAlignment.Top
+promptBox.ClearTextOnFocus = false
+promptBox.Parent = promptScroll
+
+local pPad = Instance.new("UIPadding")
+pPad.PaddingTop = UDim.new(0, 8)
+pPad.PaddingBottom = UDim.new(0, 8)
+pPad.PaddingLeft = UDim.new(0, 8)
+pPad.PaddingRight = UDim.new(0, 8)
+pPad.Parent = promptBox
+
+local function updatePromptScrollSize()
+	local txt = promptBox.Text or ""
+	charCountLabel.Text = tostring(#txt) .. " karakter"
+	local availW = math.max(200, promptScroll.AbsoluteSize.X - 28)
+	local bounds = TextService:GetTextSize(txt, promptBox.TextSize, promptBox.Font, Vector2.new(availW, 100000))
+	local targetH = math.max(180, bounds.Y + 36)
+	promptBox.Size = UDim2.new(1, -10, 0, targetH)
+	promptScroll.CanvasSize = UDim2.new(0, 0, 0, targetH)
+end
+
+promptBox:GetPropertyChangedSignal("Text"):Connect(updatePromptScrollSize)
+promptScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePromptScrollSize)
+
+-- 5. ANA ÇALIŞTIR + İKİLİ KURTARMA ÇUBUĞU + UZUN KOMUT EDİTÖRÜ
+local runBtn = Instance.new("TextButton")
+runBtn.LayoutOrder = 13
+runBtn.Size = UDim2.new(1, 0, 0, 38)
+runBtn.BackgroundColor3 = C.ACCENT
+runBtn.Text = "▶ Çalıştır"
+runBtn.TextColor3 = Color3.new(1, 1, 1)
+runBtn.Font = Enum.Font.GothamBold
+runBtn.TextSize = 13
+runBtn.Parent = root
+styleBox(runBtn)
+
+local recoveryRow = Instance.new("Frame")
+recoveryRow.LayoutOrder = 14
+recoveryRow.Size = UDim2.new(1, 0, 0, 32)
+recoveryRow.BackgroundTransparency = 1
+recoveryRow.Parent = root
+
+local undoBtn = Instance.new("TextButton")
+undoBtn.Size = UDim2.new(0.32, 0, 1, 0)
+undoBtn.BackgroundColor3 = C.CARD
+undoBtn.Text = "↩️ Geri Al"
+undoBtn.TextColor3 = C.AMBER
+undoBtn.Font = Enum.Font.GothamBold
+undoBtn.TextSize = 11
+undoBtn.Parent = recoveryRow
+styleBox(undoBtn)
+
+local retryBtn = Instance.new("TextButton")
+retryBtn.Size = UDim2.new(0.34, 0, 1, 0)
+retryBtn.Position = UDim2.new(0.33, 0, 0, 0)
+retryBtn.BackgroundColor3 = C.CARD
+retryBtn.Text = "🔄 Yeniden Dene"
+retryBtn.TextColor3 = C.ACCENT
+retryBtn.Font = Enum.Font.GothamBold
+retryBtn.TextSize = 11
+retryBtn.Parent = recoveryRow
+styleBox(retryBtn)
+
+local clearMemBtn = Instance.new("TextButton")
+clearMemBtn.Size = UDim2.new(0.32, 0, 1, 0)
+clearMemBtn.Position = UDim2.new(0.68, 0, 0, 0)
+clearMemBtn.BackgroundColor3 = C.CARD
+clearMemBtn.Text = "🧹 Yeni Oturum"
+clearMemBtn.TextColor3 = C.RED
+clearMemBtn.Font = Enum.Font.GothamBold
+clearMemBtn.TextSize = 11
+clearMemBtn.Parent = recoveryRow
+styleBox(clearMemBtn)
+
+local longRow = Instance.new("Frame")
+longRow.LayoutOrder = 15
+longRow.Size = UDim2.new(1, 0, 0, 30)
+longRow.BackgroundTransparency = 1
+longRow.Parent = root
+
+local openLongBtn = Instance.new("TextButton")
+openLongBtn.Size = UDim2.new(0.49, 0, 1, 0)
+openLongBtn.BackgroundColor3 = C.CARD
+openLongBtn.Text = "📄 Uzun Komut Aç (16K+)"
+openLongBtn.TextColor3 = C.AMBER
+openLongBtn.Font = Enum.Font.GothamBold
+openLongBtn.TextSize = 10
+openLongBtn.Parent = longRow
+styleBox(openLongBtn)
+
+local runLongBtn = Instance.new("TextButton")
+runLongBtn.Size = UDim2.new(0.49, 0, 1, 0)
+runLongBtn.Position = UDim2.new(0.51, 0, 0, 0)
+runLongBtn.BackgroundColor3 = C.GREEN
+runLongBtn.Text = "▶ Uzun Komutu Çalıştır"
+runLongBtn.TextColor3 = Color3.new(1, 1, 1)
+runLongBtn.Font = Enum.Font.GothamBold
+runLongBtn.TextSize = 10
+runLongBtn.Parent = longRow
+styleBox(runLongBtn)
+
+-- 6. CANLI AKIŞ
+makeLabel("CANLI AKIŞ & İŞLEM RAPORU", 16)
+
+local logBox = Instance.new("TextBox")
+logBox.LayoutOrder = 17
+logBox.Size = UDim2.new(1, 0, 0, 310)
+logBox.BackgroundColor3 = C.INPUT
+logBox.Text = "Hazır."
+logBox.TextColor3 = Color3.fromRGB(167, 243, 208)
+logBox.Font = Enum.Font.Code
+logBox.TextSize = 11
+logBox.TextWrapped = true
+logBox.MultiLine = true
+logBox.TextEditable = false
+logBox.ClearTextOnFocus = false
+logBox.TextXAlignment = Enum.TextXAlignment.Left
+logBox.TextYAlignment = Enum.TextYAlignment.Top
+logBox.Parent = root
+styleBox(logBox)
+
+local lPad = Instance.new("UIPadding")
+lPad.PaddingTop = UDim.new(0, 8)
+lPad.PaddingLeft = UDim.new(0, 8)
+lPad.PaddingRight = UDim.new(0, 8)
+lPad.Parent = logBox
+
+toggleBtn.Click:Connect(function()
+	widget.Enabled = not widget.Enabled
+end)
+
+Selection.SelectionChanged:Connect(function()
+	selectionBadge.Text = "Seçili Nesne: " .. tostring(#Selection:Get())
+end)
+
+-- OTOMATİK OUTPUT HATA DİNLEYİCİ
+local capturedErrors = {}
+local lastSubmittedPrompt = ""
+
+LogService.MessageOut:Connect(function(msg, msgType)
+	if msgType == Enum.MessageType.MessageError then
+		table.insert(capturedErrors, msg)
+		if #capturedErrors > 10 then table.remove(capturedErrors, 1) end
+		fixErrBtn.Text = string.format("Output Hatalarını AI'ya Gönder ve Düzelt (%d Hata)", #capturedErrors)
+		fixErrBtn.TextColor3 = C.RED
+	end
+end)
+
+local function cleanKey()
+	local cleaned = string.gsub(keyInput.Text or "", "%s+", "")
+	keyInput.Text = cleaned
+	return cleaned
+end
+
+local function getHeaders(hasBody)
+	local h = { ["Client-Key"] = cleanKey() }
+	if hasBody then h["Content-Type"] = "application/json" end
+	return h
+end
+
+local function verifyAccount()
+	local k = cleanKey()
+	if k == "" then return end
+	plugin:SetSetting("V3_ClientKey", k)
+	accountBadge.Text = "  Doğrulanıyor..."
+	accountBadge.TextColor3 = C.AMBER
+
+	local ok, res = pcall(function()
+		return HttpService:RequestAsync({
+			Url = DEFAULT_URL .. "/api/auth/me",
+			Method = "GET",
+			Headers = getHeaders(false)
+		})
+	end)
+
+	if not ok then
+		accountBadge.Text = "  Bağlantı Hatası (HTTP Ayarını Kontrol Et)"
+		accountBadge.TextColor3 = C.RED
+		logBox.Text = "Sunucu Bağlantı Hatası:\n" .. tostring(res)
+		return
+	end
+
+	if res.Success then
+		local info = HttpService:JSONDecode(res.Body)
+		if info.role == "admin" then
+			accountBadge.Text = string.format("  Hesap: %s [ADMIN - Sınırsız]", info.username)
+			accountBadge.TextColor3 = C.GREEN
+		else
+			accountBadge.Text = string.format("  Hesap: %s [%s Token]", info.username, tostring(info.tokens))
+			accountBadge.TextColor3 = C.ACCENT
+		end
+	else
+		accountBadge.Text = string.format("  Hata (HTTP %d): Geçersiz Key", res.StatusCode)
+		accountBadge.TextColor3 = C.RED
+		logBox.Text = string.format("Doğrulama Başarısız (HTTP %d):\n%s", res.StatusCode, tostring(res.Body))
+	end
+end
+
+verifyBtn.MouseButton1Click:Connect(verifyAccount)
+
+local SEARCH_SERVICES = {
+	ServerScriptService,
+	StarterGui,
+	StarterPlayer,
+	ReplicatedStorage,
+	ServerStorage,
+	workspace
+}
+
+local function getAllProjectScripts()
+	local list = {}
+	for _, srv in ipairs(SEARCH_SERVICES) do
+		for _, desc in ipairs(srv:GetDescendants()) do
+			if desc:IsA("LuaSourceContainer") and desc.Name ~= "AI_LongPrompt" and not string.find(desc:GetFullName(), "GeneratedPlugins") then
+				table.insert(list, desc)
+			end
+		end
+	end
+	return list
+end
+
+indexNowBtn.MouseButton1Click:Connect(function()
+	if cleanKey() == "" then logBox.Text = "Önce Client API Key girin." return end
+	local scripts = getAllProjectScripts()
+	if #scripts == 0 then logBox.Text = "Projede indekslenecek script bulunamadı." return end
+
+	indexNowBtn.Text = "Taranıyor..."
+	logBox.Text = string.format("%d adet script özetleyici AI modeline gönderiliyor...", #scripts)
+
+	local payloadScripts = {}
+	for _, s in ipairs(scripts) do
+		table.insert(payloadScripts, { path = s:GetFullName(), class = s.ClassName, source = string.sub(s.Source, 1, 8000) })
+	end
+
+	local ok, res = pcall(function()
+		return HttpService:RequestAsync({
+			Url = DEFAULT_URL .. "/api/agent/summarize",
+			Method = "POST",
+			Headers = getHeaders(true),
+			Body = HttpService:JSONEncode({ scripts = payloadScripts })
+		})
+	end)
+
+	indexNowBtn.Text = "İndeks Çıkar"
+	if ok and res.Success then
+		local data = HttpService:JSONDecode(res.Body)
+		local summaries = data.summaries or {}
+		local shortenedLines = {}
+		local count = 0
+
+		ChangeHistoryService:SetWaypoint("AI Index Update")
+		for _, s in ipairs(scripts) do
+			local p = s:GetFullName()
+			local sum = summaries[p]
+			if sum then
+				count = count + 1
+				local cleanSrc = string.gsub(s.Source, "\n%-%- %[AI_SUMMARY%]:.*", "")
+				s.Source = cleanSrc .. "\n-- [AI_SUMMARY]: " .. tostring(sum)
+				table.insert(shortenedLines, p .. " (" .. s.ClassName .. ") -> " .. tostring(sum))
+			end
+		end
+		ChangeHistoryService:SetWaypoint("AI Index Update End")
+
+		local idxVal = ServerStorage:FindFirstChild("AI_ShortenedIndex") or Instance.new("StringValue", ServerStorage)
+		idxVal.Name = "AI_ShortenedIndex"
+		idxVal.Value = table.concat(shortenedLines, "\n")
+
+		logBox.Text = string.format("İndeks tamamlandı! %d script özetlendi ve AI_ShortenedIndex güncellendi.", count)
+		verifyAccount()
+	else
+		logBox.Text = "İndeksleme hatası: " .. tostring(res and res.Body or res)
+	end
+end)
+
+local function collectShortenedIndex()
+	if not readIndexChecked then return {} end
+	local indexList = {}
+	for _, s in ipairs(getAllProjectScripts()) do
+		local summary = string.match(s.Source, "%-%- %[AI_SUMMARY%]:%s*(.-)\n?$")
+		table.insert(indexList, { Path = s:GetFullName(), Class = s.ClassName, Summary = summary or "Henüz özetlenmedi" })
+	end
+	return indexList
+end
+
+-- GELİŞMİŞ SAHNE DURUMU TARAYICISI (SCENE CONTEXT SCANNER)
+local function collectSceneHierarchy()
+	local hierarchy = { StarterGui = {}, Workspace = {}, ReplicatedStorage = {}, ServerScriptService = {} }
+	for _, gui in ipairs(StarterGui:GetChildren()) do
+		local item = { Name = gui.Name, Class = gui.ClassName, Path = gui:GetFullName(), Children = {} }
+		if gui:IsA("ScreenGui") then item.Enabled = gui.Enabled end
+		for _, sub in ipairs(gui:GetChildren()) do
+			if #item.Children < 15 then
+				local subInfo = { Name = sub.Name, Class = sub.ClassName, Path = sub:GetFullName() }
+				if sub:IsA("GuiObject") then subInfo.Visible = sub.Visible end
+				table.insert(item.Children, subInfo)
+			end
+		end
+		table.insert(hierarchy.StarterGui, item)
+	end
+	for _, child in ipairs(workspace:GetChildren()) do
+		if child.Name ~= "Camera" and child.Name ~= "Terrain" and #hierarchy.Workspace < 45 then
+			local info = { Name = child.Name, Class = child.ClassName, Path = child:GetFullName() }
+			if child:IsA("Model") or child:IsA("Tool") then
+				info.IsRig = (child:FindFirstChildOfClass("Humanoid") ~= nil) or (child:FindFirstChildWhichIsA("Motor6D", true) ~= nil)
+				info.ChildCount = #child:GetChildren()
+			end
+			table.insert(hierarchy.Workspace, info)
+		end
+	end
+	for _, child in ipairs(ReplicatedStorage:GetChildren()) do
+		if #hierarchy.ReplicatedStorage < 30 then
+			table.insert(hierarchy.ReplicatedStorage, { Name = child.Name, Class = child.ClassName, Path = child:GetFullName() })
+		end
+	end
+	for _, child in ipairs(ServerScriptService:GetChildren()) do
+		if #hierarchy.ServerScriptService < 30 then
+			table.insert(hierarchy.ServerScriptService, { Name = child.Name, Class = child.ClassName, Path = child:GetFullName() })
+		end
+	end
+	return hierarchy
+end
+
+local function gatherSelectedContext()
+	local selectedList = {}
+	for _, sel in ipairs(Selection:Get()) do
+		local info = { Name = sel.Name, Class = sel.ClassName, Path = sel:GetFullName() }
+		if sel:IsA("BasePart") then
+			info.Position = {sel.Position.X, sel.Position.Y, sel.Position.Z}
+			info.Size = {sel.Size.X, sel.Size.Y, sel.Size.Z}
+		elseif sel:IsA("ScreenGui") then
+			info.Enabled = sel.Enabled
+		elseif sel:IsA("GuiObject") then
+			info.Visible = sel.Visible
+		elseif sel:IsA("LuaSourceContainer") then
+			info.Source = string.sub(sel.Source, 1, 20000)
+		elseif sel:IsA("Model") then
+			local joints = {}
+			for _, d in ipairs(sel:GetDescendants()) do
+				if d:IsA("Motor6D") and d.Part0 and d.Part1 then
+					table.insert(joints, { JointName = d.Name, Part0 = d.Part0.Name, Part1 = d.Part1.Name })
+				end
+			end
+			if #joints > 0 then info.RigJoints = joints end
+		end
+		table.insert(selectedList, info)
+	end
+	return selectedList
+end
+
+local function resolveOrSearchPath(pathStr)
+	if not pathStr or pathStr == "" then return nil end
+	local services = {
+		Workspace = workspace, StarterGui = StarterGui, ServerScriptService = ServerScriptService,
+		ServerStorage = ServerStorage, ReplicatedStorage = ReplicatedStorage,
+		Lighting = game:GetService("Lighting"), StarterPack = game:GetService("StarterPack"), StarterPlayer = StarterPlayer
+	}
+	local parts = string.split(pathStr, ".")
+	local current = services[parts[1]] or game
+	for i = (services[parts[1]] and 2 or 1), #parts do
+		local found = current:FindFirstChild(parts[i])
+		if found then current = found else current = nil break end
+	end
+	if current then return current end
+	return game:FindFirstChild(parts[#parts], true)
+end
+
+local function convertProp(propName, val)
+	if type(val) == "table" then
+		if #val == 4 then return UDim2.new(val[1], val[2], val[3], val[4]) end
+		if #val == 3 then
+			if string.find(string.lower(propName), "color") then return Color3.fromRGB(val[1], val[2], val[3]) end
+			return Vector3.new(val[1], val[2], val[3])
+		end
+		if #val == 2 then return UDim.new(val[1], val[2]) end
+	elseif type(val) == "string" then
+		if propName == "Material" and Enum.Material[val] then return Enum.Material[val] end
+		if propName == "Font" and Enum.Font[val] then return Enum.Font[val] end
+		if propName == "Shape" and Enum.PartType[val] then return Enum.PartType[val] end
+	end
+	return val
+end
+
+-- OTOMATİK SÖZDİZİMİ (SYNTAX) ÖN KONTROLÜ
+local function validateActionsSyntax(actions)
+	local errs = {}
+	for idx, act in ipairs(actions or {}) do
+		local t = act.type
+		if (t == "write_script" or t == "edit_script") and act.source and act.source ~= "" then
+			local fn, err = loadstring(act.source)
+			if not fn then
+				table.insert(errs, string.format("Aksiyon #%d (%s): %s", idx, tostring(act.name or act.path or "Script"), tostring(err)))
+			end
+		elseif t == "run_luau" and act.code and act.code ~= "" then
+			local fn, err = loadstring(act.code)
+			if not fn then
+				table.insert(errs, string.format("Aksiyon #%d (run_luau): %s", idx, tostring(err)))
+			end
+		end
+	end
+	return errs
+end
+
+local function findTargetRig(rigPath)
+	if rigPath and rigPath ~= "" then
+		local obj = resolveOrSearchPath(rigPath)
+		if obj and obj:IsA("Model") then return obj end
+	end
+	for _, sel in ipairs(Selection:Get()) do
+		if sel:IsA("Model") and sel:FindFirstChildOfClass("Humanoid") then return sel end
+	end
+	return nil
+end
+
+local function buildKeyframeSequence(act)
+	local folder = ServerStorage:FindFirstChild("AI_Animations") or Instance.new("Folder", ServerStorage)
+	folder.Name = "AI_Animations"
+	local targetRig = findTargetRig(act.rig_path)
+	local parentMap = {}
+
+	if targetRig then
+		for _, d in ipairs(targetRig:GetDescendants()) do
+			if d:IsA("Motor6D") and d.Part0 and d.Part1 then parentMap[d.Part1.Name] = d.Part0.Name end
+		end
+	else
+		parentMap = {
+			LowerTorso = "HumanoidRootPart", UpperTorso = "LowerTorso", Head = "UpperTorso",
+			RightUpperArm = "UpperTorso", RightLowerArm = "RightUpperArm", RightHand = "RightLowerArm",
+			LeftUpperArm = "UpperTorso", LeftLowerArm = "LeftUpperArm", LeftHand = "LeftLowerArm",
+			RightUpperLeg = "LowerTorso", RightLowerLeg = "RightUpperLeg", RightFoot = "RightLowerLeg",
+			LeftUpperLeg = "LowerTorso", LeftLowerLeg = "LeftUpperLeg", LeftFoot = "LeftLowerLeg",
+			Torso = "HumanoidRootPart"
+		}
+	end
+
+	local kfs = Instance.new("KeyframeSequence")
+	kfs.Name = act.name or "AI_Animation"
+	kfs.Loop = act.loop == true
+	kfs.Priority = Enum.AnimationPriority[act.priority or "Action"] or Enum.AnimationPriority.Action
+
+	for _, kfData in ipairs(act.keyframes or {}) do
+		local kf = Instance.new("Keyframe")
+		kf.Time = tonumber(kfData.time) or 0
+		kf.Parent = kfs
+		local poseNodes = {}
+		local function ensurePose(partName)
+			if poseNodes[partName] then return poseNodes[partName] end
+			local p = Instance.new("Pose")
+			p.Name = partName
+			poseNodes[partName] = p
+			if partName == "HumanoidRootPart" then p.Parent = kf
+			else p.Parent = ensurePose(parentMap[partName] or "HumanoidRootPart") end
+			return p
+		end
+		ensurePose("HumanoidRootPart")
+		for partName, poseData in pairs(kfData.poses or {}) do
+			local p = ensurePose(partName)
+			local pos = poseData.pos or {0, 0, 0}
+			local rot = poseData.rot or {0, 0, 0}
+			p.CFrame = CFrame.new(pos[1] or 0, pos[2] or 0, pos[3] or 0) * CFrame.Angles(math.rad(rot[1] or 0), math.rad(rot[2] or 0), math.rad(rot[3] or 0))
+			local easing = Enum.PoseEasingStyle[poseData.easing or "Cubic"]
+			if easing then p.EasingStyle = easing end
+		end
+	end
+
+	kfs.Parent = folder
+	if targetRig then
+		local animSaves = targetRig:FindFirstChild("AnimSaves") or Instance.new("Model", targetRig)
+		animSaves.Name = "AnimSaves"
+		kfs:Clone().Parent = animSaves
+	end
+	return kfs, targetRig
+end
+
+local function getDirectorPlayerSource()
+	return table.concat({
+		'local RunService = game:GetService("RunService")',
+		'local ReplicatedStorage = game:GetService("ReplicatedStorage")',
+		'local HttpService = game:GetService("HttpService")',
+		'local UserInputService = game:GetService("UserInputService")',
+		'local Players = game:GetService("Players")',
+		'local cutsceneFolder = ReplicatedStorage:WaitForChild("AI_Cutscenes", 15)',
+		'if not cutsceneFolder then return end',
+		'local activeVal = cutsceneFolder:WaitForChild("ActiveCutscene", 15)',
+		'if not activeVal then return end',
+		'local data, keyframes, totalDuration, startTime, barsCreated = nil, {}, 0.01, os.clock(), false',
+		'local function reloadCutscene()',
+		'    if activeVal.Value == "" then return end',
+		'    local ok, decoded = pcall(function() return HttpService:JSONDecode(activeVal.Value) end)',
+		'    if not ok or type(decoded) ~= "table" then return end',
+		'    data = decoded',
+		'    keyframes = data.keyframes or {}',
+		'    table.sort(keyframes, function(a, b) return (a.time or 0) < (b.time or 0) end)',
+		'    if #keyframes > 0 then totalDuration = math.max(0.01, tonumber(keyframes[#keyframes].time) or 0.01) end',
+		'    startTime = os.clock()',
+		'    if data.cinematic_bars == true and not barsCreated then',
+		'        barsCreated = true',
+		'        task.spawn(function()',
+		'            local pgui = Players.LocalPlayer:WaitForChild("PlayerGui", 10)',
+		'            if not pgui then return end',
+		'            local gui = Instance.new("ScreenGui")',
+		'            gui.Name = "DirectorCinemaBars"',
+		'            gui.IgnoreGuiInset = true',
+		'            gui.ResetOnSpawn = false',
+		'            gui.Parent = pgui',
+		'            local topBar = Instance.new("Frame", gui)',
+		'            topBar.Size = UDim2.new(1, 0, 0.09, 0)',
+		'            topBar.BackgroundColor3 = Color3.new(0, 0, 0)',
+		'            topBar.BorderSizePixel = 0',
+		'            local botBar = Instance.new("Frame", gui)',
+		'            botBar.Size = UDim2.new(1, 0, 0.09, 0)',
+		'            botBar.Position = UDim2.new(0, 0, 0.91, 0)',
+		'            botBar.BackgroundColor3 = Color3.new(0, 0, 0)',
+		'            botBar.BorderSizePixel = 0',
+		'        end)',
+		'    end',
+		'end',
+		'reloadCutscene()',
+		'activeVal.Changed:Connect(reloadCutscene)',
+		'local function resolveTarget(pathStr)',
+		'    if not pathStr or pathStr == "" then return nil end',
+		'    local services = { Workspace = workspace, ReplicatedStorage = ReplicatedStorage }',
+		'    local parts = string.split(pathStr, ".")',
+		'    local curr = services[parts[1]] or workspace',
+		'    for i = (services[parts[1]] and 2 or 1), #parts do',
+		'        local f = curr:FindFirstChild(parts[i])',
+		'        if f then curr = f else curr = nil break end',
+		'    end',
+		'    if not curr then curr = workspace:FindFirstChild(parts[#parts], true) end',
+		'    return curr',
+		'end',
+		'local function getTargetPosition(kf)',
+		'    if kf.track_path and kf.track_path ~= "" then',
+		'        local obj = resolveTarget(kf.track_path)',
+		'        if obj then',
+		'            if obj:IsA("BasePart") then return obj.Position end',
+		'            if obj:IsA("Model") then return obj:GetPivot().Position end',
+		'        end',
+		'    end',
+		'    local la = kf.look_at or {0, 0, 0}',
+		'    return Vector3.new(la[1] or 0, la[2] or 0, la[3] or 0)',
+		'end',
+		'local function applyEasing(alpha, style)',
+		'    alpha = math.clamp(alpha, 0, 1)',
+		'    if style == "Sine" then return -(math.cos(math.pi * alpha) - 1) / 2',
+		'    elseif style == "Quad" then return alpha < 0.5 and 2 * alpha * alpha or 1 - math.pow(-2 * alpha + 2, 2) / 2',
+		'    elseif style == "Cubic" then return alpha < 0.5 and 4 * alpha * alpha * alpha or 1 - math.pow(-2 * alpha + 2, 3) / 2',
+		'    elseif style == "Expo" then',
+		'        if alpha == 0 or alpha == 1 then return alpha end',
+		'        return alpha < 0.5 and math.pow(2, 20 * alpha - 10) / 2 or (2 - math.pow(2, -20 * alpha + 10)) / 2',
+		'    end',
+		'    return alpha',
+		'end',
+		'UserInputService.InputBegan:Connect(function(input, gp)',
+		'    if not gp and input.KeyCode == Enum.KeyCode.R then startTime = os.clock() end',
+		'end)',
+		'RunService:BindToRenderStep("AIDirectorCameraStep", Enum.RenderPriority.Camera.Value + 100, function()',
+		'    if not data or #keyframes == 0 then return end',
+		'    local cam = workspace.CurrentCamera',
+		'    if not cam then return end',
+		'    if cam.CameraType ~= Enum.CameraType.Scriptable then cam.CameraType = Enum.CameraType.Scriptable end',
+		'    local elapsed = os.clock() - startTime',
+		'    if elapsed > totalDuration then elapsed = (data.loop == true) and (elapsed % totalDuration) or totalDuration end',
+		'    local k1, k2 = keyframes[1], keyframes[#keyframes]',
+		'    for i = 1, #keyframes - 1 do',
+		'        local a, b = keyframes[i], keyframes[i + 1]',
+		'        if elapsed >= (a.time or 0) and elapsed <= (b.time or 0) then k1, k2 = a, b break end',
+		'    end',
+		'    local span = (k2.time or 0) - (k1.time or 0)',
+		'    local rawAlpha = span > 0 and ((elapsed - (k1.time or 0)) / span) or 1',
+		'    local t = applyEasing(rawAlpha, k2.easing or k1.easing or "Cubic")',
+		'    local p1, p2 = k1.pos or {0, 10, 20}, k2.pos or k1.pos or {0, 10, 20}',
+		'    local pos = Vector3.new(p1[1] or 0, p1[2] or 10, p1[3] or 20):Lerp(Vector3.new(p2[1] or 0, p2[2] or 10, p2[3] or 20), t)',
+		'    local lookPos = getTargetPosition(k1):Lerp(getTargetPosition(k2), t)',
+		'    cam.FieldOfView = (tonumber(k1.fov) or 70) + ((tonumber(k2.fov) or tonumber(k1.fov) or 70) - (tonumber(k1.fov) or 70)) * t',
+		'    local shakeAmp = (tonumber(k1.shake) or 0) + ((tonumber(k2.shake) or 0) - (tonumber(k1.shake) or 0)) * t',
+		'    if shakeAmp > 0.001 then',
+		'        local clk = os.clock() * 18',
+		'        pos = pos + Vector3.new(math.noise(clk, 1.1) * shakeAmp, math.noise(clk, 2.3) * shakeAmp, math.noise(clk, 3.7) * shakeAmp)',
+		'    end',
+		'    if (pos - lookPos).Magnitude < 0.01 then lookPos = pos + Vector3.new(0, 0, -1) end',
+		'    cam.CFrame = CFrame.lookAt(pos, lookPos)',
+		'end)'
+	}, "\n")
+end
+
+local function buildDirectorCutscene(act)
+	if act.disable_character == true then Players.CharacterAutoLoads = false
+	elseif act.disable_character == false then Players.CharacterAutoLoads = true end
+
+	local folder = ReplicatedStorage:FindFirstChild("AI_Cutscenes") or Instance.new("Folder", ReplicatedStorage)
+	folder.Name = "AI_Cutscenes"
+	local payloadJson = HttpService:JSONEncode({
+		name = act.name or "MainCutscene", loop = act.loop == true,
+		cinematic_bars = act.cinematic_bars == true, keyframes = act.keyframes or {}
+	})
+	local namedVal = folder:FindFirstChild(act.name or "MainCutscene") or Instance.new("StringValue", folder)
+	namedVal.Name = act.name or "MainCutscene"
+	namedVal.Value = payloadJson
+	local activeVal = folder:FindFirstChild("ActiveCutscene") or Instance.new("StringValue", folder)
+	activeVal.Name = "ActiveCutscene"
+	activeVal.Value = payloadJson
+
+	local sps = StarterPlayer:FindFirstChild("StarterPlayerScripts")
+	if sps then
+		local ls = sps:FindFirstChild("AI_DirectorCameraPlayer") or Instance.new("LocalScript", sps)
+		ls.Name = "AI_DirectorCameraPlayer"
+		ls.Source = getDirectorPlayerSource()
+	end
+
+	local kfs = act.keyframes or {}
+	if #kfs > 0 and workspace.CurrentCamera then
+		local first = kfs[1]
+		local p, la = first.pos or {0, 15, 30}, first.look_at or {0, 0, 0}
+		workspace.CurrentCamera.FieldOfView = tonumber(first.fov) or 70
+		workspace.CurrentCamera.CFrame = CFrame.lookAt(Vector3.new(p[1] or 0, p[2] or 15, p[3] or 30), Vector3.new(la[1] or 0, la[2] or 0, la[3] or 0))
+	end
+	return namedVal.Name, #kfs
+end
+
+local function executeActions(actions)
+	ChangeHistoryService:SetWaypoint("AI V4 Snapshot Start")
+	local logs = {}
+	for _, act in ipairs(actions) do
+		local t = act.type
+		pcall(function()
+			if t == "create_instance" or t == "create_part" then
+				local obj = Instance.new(act.class or "Part")
+				obj.Name = act.name or (act.class or "Part")
+				if obj:IsA("BasePart") then obj.Anchored = true end
+				if obj:IsA("ScreenGui") then obj.Enabled = false end
+				if act.properties then
+					for k, v in pairs(act.properties) do pcall(function() obj[k] = convertProp(k, v) end) end
+				end
+				local targetParent = resolveOrSearchPath(act.parent)
+				if obj:IsA("LocalScript") and (targetParent == StarterPlayer or act.parent == "StarterPlayer") then
+					targetParent = StarterPlayer:FindFirstChild("StarterPlayerScripts") or targetParent
+				end
+				obj.Parent = targetParent or workspace
+				table.insert(logs, "+ Oluşturuldu: " .. obj.Name)
+
+			elseif t == "edit_instance" then
+				local target = resolveOrSearchPath(act.path)
+				if target and act.properties then
+					for k, v in pairs(act.properties) do pcall(function() target[k] = convertProp(k, v) end) end
+					table.insert(logs, "* Düzenlendi: " .. target.Name)
+				end
+
+			elseif t == "delete_instance" then
+				local target = resolveOrSearchPath(act.path)
+				if target then target:Destroy() table.insert(logs, "- Silindi: " .. act.path) end
+
+			elseif t == "write_script" or t == "edit_script" then
+				local sType = act.script_type or "Script"
+				local target = resolveOrSearchPath(act.path)
+				if t == "write_script" or not target then
+					target = Instance.new(sType)
+					target.Name = act.name or "AIScript"
+					local targetParent = resolveOrSearchPath(act.parent)
+					if sType == "LocalScript" and (targetParent == StarterPlayer or act.parent == "StarterPlayer" or not targetParent) then
+						targetParent = StarterPlayer:FindFirstChild("StarterPlayerScripts") or ServerScriptService
+					end
+					target.Parent = targetParent or ServerScriptService
+				end
+				target.Source = act.source or ""
+				table.insert(logs, "# Script Güncellendi: " .. target:GetFullName())
+
+			elseif t == "create_animation" then
+				local kfs, rig = buildKeyframeSequence(act)
+				table.insert(logs, "🎬 Animasyon Üretildi: " .. kfs:GetFullName() .. (rig and (" (+ " .. rig.Name .. ".AnimSaves)") or ""))
+
+			elseif t == "create_cutscene" then
+				local cName, kfCount = buildDirectorCutscene(act)
+				table.insert(logs, string.format("🎥 Yönetmen Kamerası Kuruldu: %s (%d Keyframe)", cName, kfCount))
+
+			elseif t == "set_camera" then
+				local cam = workspace.CurrentCamera
+				if cam then
+					local posArr, lookArr = act.position or {25, 18, 35}, act.look_at or {0, 0, 0}
+					local lookVec = Vector3.new(lookArr[1] or 0, lookArr[2] or 0, lookArr[3] or 0)
+					if act.target_path and act.target_path ~= "" then
+						local tgt = resolveOrSearchPath(act.target_path)
+						if tgt then lookVec = tgt:IsA("BasePart") and tgt.Position or (tgt:IsA("Model") and tgt:GetPivot().Position or lookVec) end
+					end
+					if act.fov then cam.FieldOfView = tonumber(act.fov) or 70 end
+					cam.CFrame = CFrame.lookAt(Vector3.new(posArr[1] or 25, posArr[2] or 18, posArr[3] or 35), lookVec)
+					table.insert(logs, "📷 Studio Kamerası Odaklandı")
+				end
+
+			elseif t == "create_plugin" then
+				local folder = ServerStorage:FindFirstChild("GeneratedPlugins") or Instance.new("Folder", ServerStorage)
+				folder.Name = "GeneratedPlugins"
+				local ps = Instance.new("Script")
+				ps.Name = act.name or "CustomPlugin"
+				ps.Source = act.source or ""
+				ps.Parent = folder
+				table.insert(logs, "+ Plugin Üretildi: ServerStorage.GeneratedPlugins." .. ps.Name)
+
+			elseif t == "insert_asset" then
+				local objs = game:GetObjects("rbxassetid://" .. tostring(act.asset_id))
+				if objs and #objs > 0 then
+					local assetObj = objs[1]
+					if act.name and act.name ~= "" then assetObj.Name = act.name end
+					if act.strip_scripts == true then
+						for _, d in ipairs(assetObj:GetDescendants()) do if d:IsA("LuaSourceContainer") then d:Destroy() end end
+					end
+					assetObj.Parent = resolveOrSearchPath(act.parent) or workspace
+					if act.scale and type(act.scale) == "number" and act.scale > 0 and assetObj:IsA("Model") then pcall(function() assetObj:ScaleTo(act.scale) end) end
+					local pos, rot = act.position or {0, 5, 0}, act.rotation or {0, 0, 0}
+					local targetCF = CFrame.new(pos[1] or 0, pos[2] or 5, pos[3] or 0) * CFrame.Angles(math.rad(rot[1] or 0), math.rad(rot[2] or 0), math.rad(rot[3] or 0))
+					if assetObj:IsA("Model") then pcall(function() assetObj:PivotTo(targetCF) end) elseif assetObj:IsA("BasePart") then assetObj.CFrame = targetCF end
+					table.insert(logs, "📦 3D Model Eklendi: " .. assetObj.Name)
+				end
+
+			elseif t == "terrain_fill" then
+				local mat = Enum.Material[act.material or "Grass"] or Enum.Material.Grass
+				workspace.Terrain:FillBlock(CFrame.new(unpack(act.position or {0,0,0})), Vector3.new(unpack(act.size or {50,10,50})), mat)
+				table.insert(logs, "+ Terrain Dolduruldu")
+
+			elseif t == "run_luau" and act.code then
+				local fn, err = loadstring(act.code)
+				if fn then fn() table.insert(logs, "> Prosedürel Luau Çalıştırıldı")
+				else table.insert(logs, "! Luau Hatası: " .. tostring(err)) end
+			end
+		end)
+	end
+	ChangeHistoryService:SetWaypoint("AI V4 Snapshot End")
+	return table.concat(logs, "\n")
+end
+
+local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetries)
+	stepCount = stepCount or 1
+	syntaxRetries = syntaxRetries or 0
+	if stepCount > 6 then
+		logBox.Text = "Maksimum ajan adımına (6) ulaşıldı."
+		runBtn.Text = "▶ Çalıştır"
+		runBtn.BackgroundColor3 = C.ACCENT
+		return
+	end
+
+	local body = HttpService:JSONEncode({
+		prompt = customPrompt,
+		thinking_mode = thinkingMode,
+		is_syntax_repair = syntaxRetries > 0,
+		directives = {
+			auto_mode = autoMode,
+			req_anim = manualRules.req_anim,
+			req_cam = manualRules.req_cam,
+			req_vfx = manualRules.req_vfx,
+			req_weapon = manualRules.req_weapon
+		},
+		selected_items = gatherSelectedContext(),
+		project_shortened_index = collectShortenedIndex(),
+		scene_hierarchy = collectSceneHierarchy(),
+		requested_files_content = extraFiles or {}
+	})
+
+	local ok, res = pcall(function()
+		return HttpService:RequestAsync({
+			Url = DEFAULT_URL .. "/api/agent/execute",
+			Method = "POST",
+			Headers = getHeaders(true),
+			Body = body
+		})
+	end)
+
+	if not ok or not res.Success then
+		logBox.Text = "Hata: " .. tostring(res and res.Body or res)
+		runBtn.Text = "▶ Çalıştır"
+		runBtn.BackgroundColor3 = C.ACCENT
+		return
+	end
+
+	local startData = HttpService:JSONDecode(res.Body)
+	if startData.error then
+		logBox.Text = "Hata: " .. startData.error
+		runBtn.Text = "▶ Çalıştır"
+		runBtn.BackgroundColor3 = C.ACCENT
+		return
+	end
+
+	local taskId = startData.task_id
+	local polling = true
+
+	task.spawn(function()
+		while polling do
+			task.wait(0.8)
+			local pOk, pRes = pcall(function()
+				return HttpService:RequestAsync({
+					Url = DEFAULT_URL .. "/api/agent/poll?task_id=" .. taskId,
+					Method = "GET",
+					Headers = getHeaders(false)
+				})
+			end)
+
+			if pOk and pRes.Success then
+				local pData = HttpService:JSONDecode(pRes.Body)
+				logBox.Text = string.format("Adım %d | Durum: %s\n\n%s", stepCount, tostring(pData.status), tostring(pData.buffer or ""))
+
+				if pData.status == "completed" then
+					polling = false
+					local result = pData.result or {}
+					local needFiles = result.need_files or {}
+
+					if #needFiles > 0 then
+						local loadedFiles = extraFiles or {}
+						local newlyLoaded = 0
+						for _, fPath in ipairs(needFiles) do
+							if not loadedFiles[fPath] then
+								local targetObj = resolveOrSearchPath(fPath)
+								if targetObj and targetObj:IsA("LuaSourceContainer") then
+									loadedFiles[fPath] = string.sub(targetObj.Source, 1, 22000)
+									newlyLoaded = newlyLoaded + 1
+								else
+									loadedFiles[fPath] = "-- [DOSYA BULUNAMADI]"
+								end
+							end
+						end
+						if newlyLoaded > 0 then
+							logBox.Text = "Model ilgili dosyaları okuyor (" .. table.concat(needFiles, ", ") .. ")..."
+							runAgentWorkflow(customPrompt, loadedFiles, stepCount + 1, syntaxRetries)
+							return
+						end
+					end
+
+					-- OTOMATİK SÖZDİZİMİ (SYNTAX) ÖN KONTROLÜ
+					local syntaxErrs = validateActionsSyntax(result.actions or {})
+					if #syntaxErrs > 0 and syntaxRetries < 2 then
+						logBox.Text = "⚠️ Sözdizimi hatası yakalandı, sahne bozulmadan arka planda sessizce onarılıyor...\n" .. table.concat(syntaxErrs, "\n")
+						local repairPrompt = customPrompt .. "\n\n[OTOMATİK SYNTAX ONARIMI]: Az önce ürettiğin Luau kodunda şu sözdizimi hataları tespit edildi, lütfen tüm hataları düzeltip temiz JSON döndür:\n" .. table.concat(syntaxErrs, "\n")
+						runAgentWorkflow(repairPrompt, extraFiles, stepCount + 1, syntaxRetries + 1)
+						return
+					end
+
+					local report = executeActions(result.actions or {})
+					logBox.Text = "Plan: " .. tostring(result.thought or "") .. "\n\n" .. report .. "\n\nTamamlandı."
+					verifyAccount()
+					runBtn.Text = "▶ Çalıştır"
+					runBtn.BackgroundColor3 = C.ACCENT
+
+				elseif pData.status == "failed" then
+					polling = false
+					logBox.Text = "Hata: " .. tostring(pData.error)
+					runBtn.Text = "▶ Çalıştır"
+					runBtn.BackgroundColor3 = C.ACCENT
+				end
+			end
+		end
+	end)
+end
+
+-- İKİLİ KURTARMA (GERİ AL & YENİDEN DENE) + YENİ OTURUM
+local function performRollback()
+	pcall(function() ChangeHistoryService:Undo() end)
+	if cleanKey() ~= "" then
+		pcall(function()
+			HttpService:RequestAsync({
+				Url = DEFAULT_URL .. "/api/agent/rollback",
+				Method = "POST",
+				Headers = getHeaders(false)
+			})
+		end)
+	end
+end
+
+undoBtn.MouseButton1Click:Connect(function()
+	undoBtn.Text = "Geri Alınıyor..."
+	performRollback()
+	task.wait(0.3)
+	undoBtn.Text = "↩️ Geri Al"
+	logBox.Text = "↩️ Sahne bir önceki çalışan haline döndürüldü ve son hatalı adım AI hafızasından silindi."
+end)
+
+retryBtn.MouseButton1Click:Connect(function()
+	if cleanKey() == "" or lastSubmittedPrompt == "" then
+		logBox.Text = "Yeniden denenecek önceki bir komut yok."
+		return
+	end
+	retryBtn.Text = "Sıfırlanıyor..."
+	performRollback()
+	task.wait(0.4)
+	retryBtn.Text = "🔄 Yeniden Dene"
+	runBtn.Text = "Yeniden Üretiliyor..."
+	runBtn.BackgroundColor3 = C.CARD
+	logBox.Text = "🔄 Sahne ve hafıza geri alındı, son komut temiz hafızayla yeniden çalıştırılıyor..."
+	runAgentWorkflow(lastSubmittedPrompt, {}, 1, 0)
+end)
+
+clearMemBtn.MouseButton1Click:Connect(function()
+	if cleanKey() == "" then return end
+	clearMemBtn.Text = "Siliniyor..."
+	pcall(function()
+		HttpService:RequestAsync({
+			Url = DEFAULT_URL .. "/api/agent/memory",
+			Method = "DELETE",
+			Headers = getHeaders(false)
+		})
+	end)
+	lastSubmittedPrompt = ""
+	capturedErrors = {}
+	fixErrBtn.Text = "Output Hatalarını AI'ya Gönder ve Düzelt (0 Hata)"
+	fixErrBtn.TextColor3 = C.MUTED
+	task.wait(0.3)
+	clearMemBtn.Text = "🧹 Yeni Oturum"
+	logBox.Text = "✅ Oturum sıfırlandı. Hafıza temizlendi, yeni mekaniğe hazırsın."
+end)
+
+-- UZUN KOMUT EDİTÖRÜ (16K+ KARAKTER İÇİN ANLIK EDİTÖR OKUMALI)
+openLongBtn.MouseButton1Click:Connect(function()
+	local lp = ServerStorage:FindFirstChild("AI_LongPrompt")
+	if not lp then
+		lp = Instance.new("ModuleScript")
+		lp.Name = "AI_LongPrompt"
+		lp.Source = ""
+		lp.Parent = ServerStorage
+	end
+	plugin:OpenScript(lp)
+	logBox.Text = "📄 AI_LongPrompt açıldı. Metni yapıştırıp '▶ Uzun Komutu Çalıştır' butonuna bas."
+end)
+
+runLongBtn.MouseButton1Click:Connect(function()
+	if cleanKey() == "" then logBox.Text = "Önce Client API Key girin." return end
+	local lp = ServerStorage:FindFirstChild("AI_LongPrompt")
+	if not lp then logBox.Text = "AI_LongPrompt bulunamadı. Önce '📄 Uzun Komut Aç' butonuna bas." return end
+
+	local txt = lp.Source
+	pcall(function()
+		local ed = ScriptEditorService:GetEditorSource(lp)
+		if ed and #ed > 0 then txt = ed end
+	end)
+
+	if string.gsub(txt, "%s+", "") == "" then
+		logBox.Text = "AI_LongPrompt boş!"
+		return
+	end
+	plugin:SetSetting("V3_ClientKey", cleanKey())
+	lastSubmittedPrompt = txt
+	runBtn.Text = "Çalışıyor..."
+	runBtn.BackgroundColor3 = C.CARD
+	logBox.Text = string.format("Uzun komut gönderiliyor (%d karakter)...", #txt)
+	runAgentWorkflow(txt, {}, 1, 0)
+end)
+
+runBtn.MouseButton1Click:Connect(function()
+	if cleanKey() == "" or promptBox.Text == "" then
+		logBox.Text = "Client API Key ve Komut alanları zorunludur."
+		return
+	end
+	plugin:SetSetting("V3_ClientKey", cleanKey())
+	lastSubmittedPrompt = promptBox.Text
+	runBtn.Text = "Çalışıyor..."
+	runBtn.BackgroundColor3 = C.CARD
+	logBox.Text = string.format("Komut gönderiliyor (%d karakter)...", #promptBox.Text)
+	runAgentWorkflow(promptBox.Text, {}, 1, 0)
+end)
+
+fixErrBtn.MouseButton1Click:Connect(function()
+	if #capturedErrors == 0 then logBox.Text = "Yakalanmış Output hatası yok." return end
+	local errText = "Roblox Studio Output penceresinde şu hatalar oluştu, ilgili scriptleri bul ve düzelt:\n" .. table.concat(capturedErrors, "\n")
+	capturedErrors = {}
+	fixErrBtn.Text = "Output Hatalarını AI'ya Gönder ve Düzelt (0 Hata)"
+	fixErrBtn.TextColor3 = C.MUTED
+	runBtn.Text = "Hatalar Onarılıyor..."
+	runBtn.BackgroundColor3 = C.CARD
+	runAgentWorkflow(errText, {}, 1, 0)
+end)
+
+task.spawn(verifyAccount)]]></ProtectedString>
+			<bool name="Disabled">false</bool>
+			<Content name="LinkedSource"><null></null></Content>
+			<token name="RunContext">0</token>
+			<string name="ScriptGuid">{AACD8080-56C1-4245-9D4A-6B6BF5094720}</string>
+			<BinaryString name="AttributesSerialize"></BinaryString>
+			<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+			<bool name="DefinesCapabilities">false</bool>
+			<string name="Name">Script</string>
+			<BinaryString name="SerializedOverrides"></BinaryString>
+			<int64 name="SourceAssetId">-1</int64>
+			<SharedString name="Tags">yuZpQdnvvUBOTYh1jqZ2cA==</SharedString>
+		</Properties>
+	</Item>
+	<SharedStrings>
+		<SharedString md5="yuZpQdnvvUBOTYh1jqZ2cA=="></SharedString>
+	</SharedStrings>
+</roblox>
