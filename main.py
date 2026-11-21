@@ -90,7 +90,7 @@ def build_full_state_snapshot() -> dict:
     memories = [dict(m) for m in conn.execute("SELECT * FROM memory_logs ORDER BY id DESC LIMIT 100").fetchall()]
     conn.close()
     return {
-        "backup_version": "7.5-multi-agent-15",
+        "backup_version": "8.0-unified-4-units",
         "synced_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg,
         "users": users,
@@ -226,7 +226,7 @@ def init_db():
         try:
             parsed_state = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
             if apply_full_state_snapshot(parsed_state):
-                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve 15-Agent ayarları başarıyla geri yüklendi.")
+                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve 4-Birim ayarları başarıyla geri yüklendi.")
         except Exception as e:
             print(f"[Upstash Redis] Başlangıç geri yükleme hatası: {e}")
 
@@ -238,7 +238,7 @@ def get_db():
     return conn
 
 async def get_fresh_config() -> dict:
-    """Her çağrıda güncel 15-Agent ayarlarını Upstash Redis'ten okur (erişilemezse yerel SQLite'a düşer)."""
+    """Her çağrıda güncel 4-Birim ayarlarını Upstash Redis'ten okur (erişilemezse yerel SQLite'a düşer)."""
     url, token = get_upstash_creds()
     if url and token:
         try:
@@ -569,18 +569,18 @@ async def web_portal():
 
         <div class="card">
             <h3>
-                <span>15 Agent Orkestrasyon Ayarları (1 Ana Orkestratör + 14 Uzman Alt Agent)</span>
+                <span>4 Birim Bütünleşik Orkestrasyon Ayarları (1 Ana Orkestratör + 3 Uzman Katman)</span>
                 <div style="display:flex; gap:8px; align-items:center;">
                     <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(true)">Tümünü Aç</button>
                     <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(false)">Tümünü Kapat</button>
                 </div>
             </h3>
             <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
-                Her agent için bağımsız Model ID (ör. <code>claude-haiku-5-5</code>, <code>qwen3-235b-a22b-instruct-2507</code>, <code>mistral-small-3-2-24b-instruct</code>) ve evrensel sistem talimatı atayabilirsin. Kaydettiğinde tüm 15 agent ayarı anında Upstash Redis'e yazılır ve her çağrıda oradan okunur.
+                Her agent için bağımsız Model ID (ör. <code>claude-haiku-5-5</code>, <code>qwen3-235b-a22b-instruct-2507</code>, <code>mistral-small-3-2-24b-instruct</code>) ve evrensel sistem talimatı atayabilirsin. Kaydettiğinde tüm 4 birim ayarı anında Upstash Redis'e yazılır ve her çağrıda oradan okunur.
             </p>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:16px; background:var(--bg); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
                 <input type="text" id="bulk_agent_model" placeholder="Toplu Model ID (ör. claude-haiku-5-5)" style="margin:0; flex:1;">
-                <button class="btn btn-amber btn-sm" onclick="applyBulkAgentModel()">Tüm 15 Agent'a Uygula</button>
+                <button class="btn btn-amber btn-sm" onclick="applyBulkAgentModel()">Tüm 4 Birime Uygula</button>
             </div>
             <div id="agents-accordion-container">Yükleniyor...</div>
             <button class="btn btn-success" style="width:100%; margin-top:12px; padding:12px;" onclick="saveSettings()">💾 Ayarları Kaydet (ve Upstash'e Eşitle)</button>
@@ -667,7 +667,7 @@ async def web_portal():
 
     <div id="sec-live" class="section">
         <div class="card">
-            <h3>Aktif Model & 15 Agent Canlı Boru Hattı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
+            <h3>Aktif Model & 4 Birim Canlı Boru Hattı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
             <div id="live-pipeline-grid" class="pipe-grid"></div>
             <div class="log-box" id="live-stream-box" style="min-height:140px; max-height:460px; overflow:auto; border-left:3px solid var(--success);">Bekleniyor...</div>
         </div>
@@ -889,7 +889,7 @@ async function saveSettings() {
         agents: agentsPayload
     });
     if (res.ok) {
-        alert('Tüm 15 Agent ve sistem ayarları kaydedildi, Upstash Redis ile eşitlendi.');
+        alert('Tüm 4 Birim ve sistem ayarları kaydedildi, Upstash Redis ile eşitlendi.');
     } else {
         alert('Ayarlar kaydedilirken hata oluştu.');
     }
@@ -1698,7 +1698,7 @@ async def discover_project(request: Request, client_key: str = Header(None)):
         "LATEST_USER_MESSAGE": user_msg,
         "CONVERSATION_HISTORY": session["conversation"][-8:],
         "EXISTING_PROJECT_NOTES": session["project_notes"],
-        "AVAILABLE_14_SUBAGENTS": [
+        "AVAILABLE_3_LAYERS": [
             {"id": a["id"], "title": a["title"], "phase": a["phase"], "description": a["description"]}
             for a in V7.SUB_AGENTS
         ],
@@ -1780,7 +1780,7 @@ async def discover_project(request: Request, client_key: str = Header(None)):
 
 
 # =====================================================================
-# ADIM B: SEÇİCİ YÖNLENDİRME + 4 FAZLI 13 ALT AGENT BORU HATTI
+# ADIM B: V8 BÜTÜNLEŞİK 4 BİRİM MİMARİSİ (1 ANA + 3 UZMAN KATMAN)
 # =====================================================================
 async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
     cfg = await get_fresh_config()
@@ -1821,8 +1821,9 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
 
     is_syntax_repair = bool(payload.get("is_syntax_repair", False))
     scene_compact = V6.compact_scene(payload.get("scene_hierarchy", {}))
+    forbid_npc = V7.user_forbids_npc(prompt_text, project_notes)
 
-    # 15 Agent Canlı Boru Hattı Durumu
+    # 4 Birim Canlı Boru Hattı Durumu
     pipeline: list[dict] = [
         {
             "id": a["id"],
@@ -1850,36 +1851,19 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             TASKS[task_id]["buffer"] = report
         return report
 
-    LIVE_STATE["status"] = f"{user['username']} | V7.5 15-Agent Orkestrasyon başlıyor..."
+    LIVE_STATE["status"] = f"{user['username']} | V8 Bütünleşik 4 Birim Üretimi başlıyor..."
     LIVE_STATE["buffer"] = ""
-    sync_live("Main Agent başlatılıyor...")
-
-    def summarize_actions(acts):
-        out = []
-        for a in acts:
-            item = {"type": a.get("type")}
-            for k in ("name", "path", "parent", "class", "rig_type", "behavior", "preset", "mode", "target_path", "script_type"):
-                if a.get(k) not in (None, ""):
-                    item[k] = a.get(k)
-            props = a.get("properties") or {}
-            if isinstance(props, dict):
-                for k in ("Position", "Size"):
-                    if k in props:
-                        item[k] = props[k]
-            if a.get("position") is not None:
-                item["position"] = a.get("position")
-            out.append(item)
-        return out
+    sync_live("Main Agent üretim planını hazırlıyor...")
 
     try:
         total_out_tokens = 0
         repaired_json = {}
 
         if is_syntax_repair:
-            repair_model = agents_cfg["agent_combat_skills"]["model"]
+            repair_model = agents_cfg["layer_server_core"]["model"]
             repair_sys = V7.build_subagent_system_prompt(
-                "agent_combat_skills",
-                agents_cfg["agent_combat_skills"]["prompt"],
+                "layer_server_core",
+                agents_cfg["layer_server_core"]["prompt"],
                 mode_instruction,
                 ["SYNTAX ONARIMI MODU: Sadece sözdizimi hatalı scriptleri `write_script` / `edit_script` ile düzelt."],
             )
@@ -1901,171 +1885,130 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         else:
             combined_actions: list[dict] = []
             combined_thoughts: list[str] = []
-            agent_summaries: list[dict] = []
-            shared_manifest = V7.create_empty_manifest(str(project_notes.get("game_title") or ""))
+            world_manifest = V7.create_empty_manifest(str(project_notes.get("game_title") or ""))
+            client_manifest = V7.create_empty_manifest(str(project_notes.get("game_title") or ""))
 
             # =========================================================
-            # FAZ 0: MAIN AGENT — SEÇİCİ YÖNLENDİRME & MANIFEST BAŞLATMA
+            # BİRİM 0: MAIN AGENT — 3 KATMAN İÇİN ORTAK GÖREV EMRİ
             # =========================================================
             main_cfg = agents_cfg["main_agent"]
             pipe_by_id["main_agent"]["status"] = "running"
-            LIVE_STATE["status"] = f"{user['username']} | Main Agent yönlendirme planı hazırlıyor..."
-            sync_live("Main Agent 14 alt agent için katı PASS kuralıyla yönlendirme yapıyor...")
+            LIVE_STATE["status"] = f"{user['username']} | 0. Main Agent ortak üretim planı hazırlıyor..."
+            sync_live("Main Agent 3 bütünleşik katman için görev emirlerini hazırlıyor...")
 
-            route_sys = (
+            brief_sys = (
                 main_cfg["prompt"]
-                + "\n\n[AKTİF MOD: ROUTE (SEÇİCİ AGENT YÖNLENDİRME & SHARED_MANIFEST)]\n"
-                + "- 14 alt agent için KATI PASS KURALINA uy: PROJECT_NOTES içinde geçen her kategori ZORUNLU ACTIVE, yalnızca hiç geçmeyen veya kullanıcının açıkça reddettiği agent'lar PASS olacak şekilde `\"status\": \"ACTIVE\"` ve özel `task_input` ver; gereksiz veya kullanıcının reddettiği tüm agent'lara `\"status\": \"PASS\"` ve kısa `reason` yaz.\n"
-                + "- SADECE geçerli tek bir JSON objesi döndür (markdown/kod bloğu yok)."
+                + "\n\n[AKTİF MOD: BRIEF (3 BÜTÜNLEŞİK KATMAN İÇİN ORTAK GÖREV EMRİ)]\n"
+                + "- 3 katman (`layer_world_builder`, `layer_client_core`, `layer_server_core`) için net, çelişkisiz görev emirleri yaz.\n"
+                + "- SADECE geçerli tek bir JSON objesi döndür."
             )
-            route_payload = {
-                "MODE": "ROUTE",
+            brief_payload = {
+                "MODE": "BRIEF",
                 "KULLANICI_KOMUTU": prompt_text,
                 "PROJECT_NOTES": project_notes,
                 "DISCOVERY_CONVERSATION": discovery_conv[-8:],
                 "GECMIS_HAFIZA": memory_list,
                 "ACTIVE_QUALITY_DIRECTIVES": active_directives,
-                "AVAILABLE_14_SUBAGENTS": [
-                    {"id": a["id"], "order": a["order"], "phase": a["phase"], "title": a["title"], "description": a["description"], "allowed_actions": a["allowed_actions"]}
-                    for a in V7.SUB_AGENTS
-                ],
                 "SCENE_HIERARCHY": scene_compact,
                 "SELECTED_ITEMS": payload.get("selected_items", []),
             }
-
-            route_out = await stream_venice_call(
+            brief_out = await stream_venice_call(
                 cfg,
                 [
-                    {"role": "system", "content": route_sys},
-                    {"role": "user", "content": json.dumps(route_payload, ensure_ascii=False)[:90000]},
+                    {"role": "system", "content": brief_sys},
+                    {"role": "user", "content": json.dumps(brief_payload, ensure_ascii=False)[:85000]},
                 ],
                 task_id,
                 thinking_mode=thinking_mode,
-                stage_prefix=f"[0/14 Main Agent Yönlendirme — {main_cfg['model']}]",
+                stage_prefix=f"[0/3 Main Agent Plan — {main_cfg['model']}]",
                 model_override=main_cfg["model"],
                 buffer_builder=lambda tail: V7.format_pipeline_report(pipeline, handoffs, tail),
             )
-            total_out_tokens += estimate_tokens(route_out)
-            route_json = extract_and_repair_json(route_out)
+            total_out_tokens += estimate_tokens(brief_out)
+            brief_json = extract_and_repair_json(brief_out)
+            if isinstance(brief_json.get("project_notes"), dict) and brief_json["project_notes"]:
+                project_notes = {**project_notes, **brief_json["project_notes"]}
+                forbid_npc = V7.user_forbids_npc(prompt_text, project_notes)
+            layer_briefs = brief_json.get("layer_briefs") if isinstance(brief_json.get("layer_briefs"), dict) else {}
 
-            if isinstance(route_json.get("project_notes"), dict) and route_json["project_notes"]:
-                project_notes = {**project_notes, **route_json["project_notes"]}
-            if isinstance(route_json.get("shared_manifest"), dict):
-                shared_manifest = V7.merge_manifest(shared_manifest, route_json["shared_manifest"], "main_agent", [])
-
-            routing = V7.normalize_routing(route_json.get("routing"), prompt_text, project_notes)
             pipe_by_id["main_agent"]["status"] = "done"
-
-            active_names = []
-            pass_names = []
-            for a in V7.SUB_AGENTS:
-                aid = a["id"]
-                dec = routing[aid]
-                if dec["status"] == "ACTIVE":
-                    pipe_by_id[aid]["status"] = "active"
-                    pipe_by_id[aid]["reason"] = dec["reason"]
-                    active_names.append(a["short_name"])
-                else:
-                    pipe_by_id[aid]["status"] = "pass"
-                    pipe_by_id[aid]["reason"] = dec["reason"]
-                    pass_names.append(a["short_name"])
-
-            handoffs.append(f"Main Agent → AKTİF ({len(active_names)}): {', '.join(active_names)}")
-            if pass_names:
-                handoffs.append(f"Main Agent → PASS ({len(pass_names)}): {', '.join(pass_names)}")
-            if route_json.get("thought"):
-                combined_thoughts.append("[Main Agent] " + str(route_json["thought"]))
-            sync_live("Seçici yönlendirme tamamlandı, Faz 1 başlatılıyor...")
+            for aid in V7.SUB_AGENT_IDS:
+                pipe_by_id[aid]["status"] = "active"
+            if brief_json.get("thought"):
+                combined_thoughts.append("[Main Agent] " + str(brief_json["thought"]))
+            handoffs.append("Main Agent → 3 Bütünleşik Katman planı hazırlandı" + (" (NPC YASAKLI)" if forbid_npc else ""))
+            sync_live("Katman 1 (Dünya & Animasyon) başlatılıyor...")
 
             # =========================================================
-            # FAZ 1 → FAZ 2 → FAZ 3 → FAZ 4 (ZORUNLU SIRAYLA 1..13)
+            # KATMAN 1 → KATMAN 2 → KATMAN 3 (SIFIR KOPUKLUK BORU HATTI)
             # =========================================================
             need_files_result = None
             for meta in V7.SUB_AGENTS:
                 aid = meta["id"]
-                dec = routing[aid]
-                if dec["status"] != "ACTIVE":
-                    continue
-
                 a_cfg = agents_cfg[aid]
                 a_model = a_cfg["model"]
                 allowed_set = set(meta["allowed_actions"])
+                if aid == "layer_world_builder" and forbid_npc:
+                    allowed_set.discard("spawn_rig")
+
                 pipe_by_id[aid]["status"] = "running"
                 pipe_by_id[aid]["model"] = a_model
-                LIVE_STATE["status"] = f"{user['username']} | Faz {meta['phase']} • {meta['title']} ({a_model})..."
+                LIVE_STATE["status"] = f"{user['username']} | {meta['title']} ({a_model})..."
 
-                # Ajanlar arası zorunlu SHARED_MANIFEST veri aktarımları
                 extra_notes: list[str] = []
                 if cfg.get("system_prompt") and not V6.is_legacy_prompt(cfg["system_prompt"]):
                     extra_notes.append("ADMIN EK KURALI: " + cfg["system_prompt"][:1500])
-
-                if aid in ("agent_animation", "agent_movement", "agent_combat_skills", "agent_ai_npc") and rig_type_hints:
+                if rig_type_hints:
                     extra_notes.extend(rig_type_hints)
+                if forbid_npc:
+                    extra_notes.append("KESİN YASAK: Kullanıcı NPC/bot İSTEMEDİ! Asla NPC veya `spawn_rig` üretme.")
 
-                if aid in ("agent_movement", "agent_combat_skills", "agent_ai_npc") and shared_manifest.get("animations"):
-                    anim_list_str = ", ".join(
-                        (f"{x.get('name')} ({x.get('trigger') or x.get('preset') or 'action'})" if isinstance(x, dict) else str(x))
-                        for x in shared_manifest["animations"]
-                    )
-                    extra_notes.append(
-                        f"ZORUNLU AGENT 5 ANİMASYON AKTARIMI: Agent 5 şu animasyonları üretti -> [{anim_list_str}]. "
-                        "Bunları BİREBİR aynı isimlerle `AIKit.PlayAnim(target, \"TamIsim\")` üzerinden ilgili tuşlara/durumlara bağla!"
-                    )
-                    handoffs.append(f"Agent 5 (Animasyon) → {meta['title']}: {len(shared_manifest['animations'])} animasyon aktarıldı")
-
-                if aid in ("agent_movement", "agent_combat_skills", "agent_interaction", "agent_inventory", "agent_economy") and shared_manifest.get("ui_elements"):
-                    ui_preview = [
-                        (x.get("path") or x.get("name") if isinstance(x, dict) else str(x))
-                        for x in shared_manifest["ui_elements"][:30]
-                    ]
-                    extra_notes.append("ZORUNLU AGENT 6 UI AKTARIMI: Mevcut UI elemanları -> " + ", ".join(ui_preview) + ". `ScreenGui.Enabled = true` yap ve birebir aynı isimlerle güncelle.")
-                    handoffs.append(f"Agent 6 (UI/HUD) → {meta['title']}: {len(shared_manifest['ui_elements'])} UI elemanı aktarıldı")
-
-                if aid in ("agent_combat_skills", "agent_movement") and shared_manifest.get("vfx"):
-                    vfx_preview = [
-                        (x.get("path") or x.get("name") if isinstance(x, dict) else str(x))
-                        for x in shared_manifest["vfx"][:20]
-                    ]
-                    extra_notes.append("AGENT 4 VFX ŞABLONLARI: " + ", ".join(vfx_preview))
-                    handoffs.append(f"Agent 4 (VFX) → {meta['title']}: {len(shared_manifest['vfx'])} VFX şablonu aktarıldı")
-
-                if aid == "agent_camera" and project_notes.get("camera_preference"):
-                    extra_notes.append(f"KULLANICI KAMERA TERCİHİ: {project_notes['camera_preference']}")
+                if aid == "layer_client_core":
+                    anim_names = [x.get("name") if isinstance(x, dict) else str(x) for x in world_manifest.get("animations", [])]
+                    if anim_names:
+                        extra_notes.append("WORLD_MANIFEST ANİMASYONLARI (birebir aynı isimle AIKit.PlayAnim kullan): " + ", ".join(anim_names))
+                    extra_notes.append("TÜM istemci arayüzü (StartMenuGui, GameHUD, PlayerGuideUI), tuşlar ve kamera-güvenli FOV TEK BİR `StarterPlayer.StarterPlayerScripts.ClientGameCore` LocalScript'i içinde olmalıdır.")
+                elif aid == "layer_server_core":
+                    rem_names = [x.get("name") if isinstance(x, dict) else str(x) for x in client_manifest.get("remotes", [])]
+                    if rem_names:
+                        extra_notes.append("CLIENT_MANIFEST REMOTEEVENT İSİMLERİ (birebir aynı isimle dinle): " + ", ".join(rem_names))
+                    extra_notes.append("TÜM sunucu fiziği, skor/süre ve oyun döngüsü TEK BİR `ServerScriptService.ServerGameCore` Script'i içinde olmalıdır.")
 
                 sync_live(f"{meta['title']} çalışıyor ({a_model})...")
-
                 sub_sys = V7.build_subagent_system_prompt(aid, a_cfg["prompt"], mode_instruction, extra_notes)
+
                 sub_payload = {
-                    "AGENT_ID": aid,
-                    "AGENT_ROLE": meta["title"],
-                    "GOREV_EMRI": dec["task_input"] or prompt_text,
+                    "LAYER_ID": aid,
+                    "LAYER_ROLE": meta["title"],
+                    "GOREV_EMRI": str(layer_briefs.get(aid) or prompt_text),
                     "KULLANICI_KOMUTU": prompt_text,
                     "PROJECT_NOTES": project_notes,
-                    "SHARED_MANIFEST": shared_manifest,
-                    "ONCEKI_AGENT_OZETLERI": agent_summaries[-6:],
                     "SCENE_HIERARCHY": scene_compact,
                     "SELECTED_ITEMS": payload.get("selected_items", []),
                 }
-                if meta["phase"] in (3, 4):
+                if aid in ("layer_client_core", "layer_server_core"):
+                    sub_payload["WORLD_MANIFEST"] = world_manifest
                     sub_payload["PROJECT_INDEX"] = payload.get("project_shortened_index", [])
                     sub_payload["REQUESTED_FILES_CONTENT"] = payload.get("requested_files_content", {})
                     sub_payload["GECMIS_HAFIZA"] = memory_list
+                if aid == "layer_server_core":
+                    sub_payload["CLIENT_MANIFEST"] = client_manifest
 
                 sub_messages = [
                     {"role": "system", "content": sub_sys},
-                    {"role": "user", "content": json.dumps(sub_payload, ensure_ascii=False)[:105000]},
+                    {"role": "user", "content": json.dumps(sub_payload, ensure_ascii=False)[:110000]},
                 ]
 
                 try:
                     sub_json = {}
-                    max_turns = 2 if aid in ("agent_architecture", "agent_environment") else 1
+                    max_turns = 2 if aid == "layer_world_builder" else 1
                     for _turn in range(max_turns):
                         sub_out = await stream_venice_call(
                             cfg,
                             sub_messages,
                             task_id,
                             thinking_mode=thinking_mode,
-                            stage_prefix=f"[Faz {meta['phase']} • {meta['title']} — {a_model}]",
+                            stage_prefix=f"[{meta['title']} — {a_model}]",
                             model_override=a_model,
                             buffer_builder=lambda tail: V7.format_pipeline_report(pipeline, handoffs, tail),
                         )
@@ -2085,7 +2028,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                             sub_messages.append({"role": "assistant", "content": sub_out})
                             sub_messages.append({
                                 "role": "user",
-                                "content": "TOOLBOX_ARAMA_SONUCLARI:\n" + json.dumps(toolbox_results, ensure_ascii=False) + "\nŞimdi uygun AssetId'leri seçip JSON aksiyonlarını ve manifest_updates alanını döndür. Tekrar search_toolbox çağırma.",
+                                "content": "TOOLBOX_ARAMA_SONUCLARI:\n" + json.dumps(toolbox_results, ensure_ascii=False) + "\nŞimdi uygun AssetId'leri seçip Katman 1 aksiyonlarını ve manifest_updates alanını döndür. Tekrar search_toolbox çağırma.",
                             })
                             continue
                         break
@@ -2099,36 +2042,54 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                             continue
                         t = a.get("type")
                         if t == "fallback_code" and a.get("source") and "write_script" in allowed_set:
-                            a = {"type": "write_script", "script_type": "Script", "name": f"{meta['short_name'].replace(' ', '')}Script", "parent": "ServerScriptService", "source": a["source"]}
+                            is_client = (aid == "layer_client_core")
+                            a = {
+                                "type": "write_script",
+                                "script_type": "LocalScript" if is_client else "Script",
+                                "name": "ClientGameCore" if is_client else "ServerGameCore",
+                                "parent": "StarterPlayer.StarterPlayerScripts" if is_client else "ServerScriptService",
+                                "source": a["source"],
+                            }
                             t = "write_script"
                         if t in allowed_set:
                             filtered_actions.append(a)
 
+                    # Katman 1 Zorunlu Güvenli SpawnLocation Koruması
+                    if aid == "layer_world_builder":
+                        has_spawn = any(
+                            a.get("type") == "create_instance" and a.get("class") == "SpawnLocation"
+                            for a in filtered_actions
+                        ) or any(
+                            isinstance(it, dict) and it.get("Class") == "SpawnLocation"
+                            for it in ((payload.get("scene_hierarchy") or {}).get("Workspace") or [])
+                        )
+                        if not has_spawn:
+                            filtered_actions.append({
+                                "type": "create_instance",
+                                "class": "SpawnLocation",
+                                "name": "SafeSpawnLocation",
+                                "parent": "Workspace",
+                                "properties": {"Size": [8, 1, 8], "Position": [0, 3, 0], "Anchored": True, "Transparency": 1, "CanCollide": False},
+                            })
+
                     combined_actions.extend(filtered_actions)
-                    shared_manifest = V7.merge_manifest(shared_manifest, sub_json.get("manifest_updates"), aid, filtered_actions)
+                    if aid == "layer_world_builder":
+                        world_manifest = V7.merge_manifest(world_manifest, sub_json.get("manifest_updates"), aid, filtered_actions)
+                        handoffs.append(
+                            f"Katman 1 (Dünya) → WORLD_MANIFEST: {len(world_manifest['world_objects'])} obje, {len(world_manifest['animations'])} animasyon"
+                        )
+                    elif aid == "layer_client_core":
+                        client_manifest = V7.merge_manifest(client_manifest, sub_json.get("manifest_updates"), aid, filtered_actions)
+                        handoffs.append(
+                            f"Katman 2 (ClientGameCore) → CLIENT_MANIFEST: {len(client_manifest['remotes'])} RemoteEvent, {len(client_manifest['keybinds'])} tuş"
+                        )
+                    elif aid == "layer_server_core":
+                        handoffs.append(f"Katman 3 (ServerGameCore): {len(filtered_actions)} sunucu aksiyonu tamamlandı")
 
                     pipe_by_id[aid]["status"] = "done"
                     pipe_by_id[aid]["actions_count"] = len(filtered_actions)
-
                     if sub_json.get("thought"):
                         combined_thoughts.append(f"[{meta['title']}] " + str(sub_json["thought"]))
-
-                    if aid == "agent_animation" and shared_manifest.get("animations"):
-                        anames = [x.get("name") if isinstance(x, dict) else str(x) for x in shared_manifest["animations"]]
-                        handoffs.append(f"Agent 5 (Animasyon) Manifeste Yazdı ({len(anames)}): {', '.join(anames[:15])}")
-                    elif aid == "agent_ui_menus" and shared_manifest.get("ui_elements"):
-                        handoffs.append(f"Agent 6 (UI, HUD & Menü) Manifeste Yazdı: {len(shared_manifest['ui_elements'])} UI elemanı")
-                    elif aid == "agent_player_guide" and (shared_manifest.get("guide_elements") or shared_manifest.get("scripts")):
-                        handoffs.append(f"Agent 7 (Oyuncu Rehberi) Manifeste Yazdı: {len(shared_manifest.get('guide_elements', []))} rehber öğesi")
-                    elif aid == "agent_architecture" and shared_manifest.get("world_objects"):
-                        handoffs.append(f"Agent 1 (Mimari) Manifeste Yazdı: {len(shared_manifest['world_objects'])} sahne yapısı")
-
-                    agent_summaries.append({
-                        "agent": aid,
-                        "title": meta["title"],
-                        "thought": sub_json.get("thought", ""),
-                        "actions_summary": summarize_actions(filtered_actions)[:80],
-                    })
                     sync_live(f"{meta['title']} tamamlandı ({len(filtered_actions)} aksiyon).")
 
                 except Exception as sub_err:
@@ -2136,20 +2097,14 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     pipe_by_id[aid]["reason"] = str(sub_err)[:120]
                     ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"{meta['title']} Hatası", "details": str(sub_err)})
                     handoffs.append(f"⚠️ {meta['title']} hata aldı: {str(sub_err)[:80]}")
-                    sync_live(f"{meta['title']} hata aldı, sonraki faza geçiliyor...")
+                    sync_live(f"{meta['title']} hata aldı, sonraki katmana geçiliyor...")
 
             if need_files_result:
                 repaired_json = need_files_result
             else:
-                # Güvenlik ağları: kamera, AIKit, varsayılan sinematik atmosfer
+                # AIKit ve Varsayılan Sinematik Atmosfer güvenceleri
                 p_low = (prompt_text + " " + json.dumps(project_notes, ensure_ascii=False)).lower()
-                wants_cam = any(k in p_low for k in ["3. şahıs", "3.şahıs", "üçüncü şahıs", "third person", "3rd person", "tps", "omuz", "shoulder", "kamera takip", "follow cam"])
-                has_cam = any(a.get("type") in ("setup_camera", "create_cutscene") for a in combined_actions)
-                if wants_cam and not has_cam:
-                    wants_shoulder = any(k in p_low for k in ["omuz", "shoulder", "tps", "shooter"])
-                    combined_actions.append({"type": "setup_camera", "mode": "third_person", "distance": 11, "shoulder_offset": 2.0 if wants_shoulder else 0, "sprint": True})
-
-                is_scene_build = pipe_by_id["agent_architecture"]["actions_count"] > 0 or len(combined_actions) > 0
+                is_scene_build = len(combined_actions) > 0
                 uses_kit = any("AIKit" in str(a.get("source", "")) for a in combined_actions)
                 has_kit_action = any(a.get("type") in ("spawn_rig", "create_animation", "setup_camera", "install_kit") for a in combined_actions)
                 if (uses_kit or is_scene_build) and not has_kit_action:
@@ -2165,11 +2120,12 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     combined_actions.insert(0, {"type": "setup_atmosphere"})
 
                 repaired_json = {
-                    "thought": "\n".join(combined_thoughts) if combined_thoughts else "V7.5 15-Agent üretimi tamamlandı.",
+                    "thought": "\n".join(combined_thoughts) if combined_thoughts else "V8 4-Birim üretimi tamamlandı.",
                     "actions": combined_actions,
                     "agent_pipeline": pipeline,
                     "handoff_logs": handoffs,
-                    "shared_manifest": shared_manifest,
+                    "world_manifest": world_manifest,
+                    "client_manifest": client_manifest,
                     "project_notes": project_notes,
                 }
 
@@ -2201,7 +2157,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             if scripts:
                 repaired_json["actions"] = [{"type": "edit_script", "path": scripts[0]["Path"], "source": actions[0]["source"]}]
             else:
-                repaired_json["actions"] = [{"type": "write_script", "script_type": "Script", "name": "AIGenerated", "parent": "ServerScriptService", "source": actions[0]["source"]}]
+                repaired_json["actions"] = [{"type": "write_script", "script_type": "Script", "name": "ServerGameCore", "parent": "ServerScriptService", "source": actions[0]["source"]}]
 
         final_report = sync_live("Üretim tamamlandı! Aksiyonlar Roblox Studio'ya aktarılıyor...")
         LIVE_STATE["status"] = "Tamamlandı"
@@ -2214,7 +2170,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         }
 
     except Exception as e:
-        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "V7 Orkestrasyon Hatası", "details": str(e)})
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "V8 Orkestrasyon Hatası", "details": str(e)})
         LIVE_STATE["status"] = "Hata"
         TASKS[task_id] = {
             "status": "failed",
@@ -2235,7 +2191,7 @@ async def execute_task(request: Request, client_key: str = Header(None)):
         return JSONResponse({"error": "Yetersiz kredi (Token)."}, status_code=402)
 
     task_id = str(uuid.uuid4())
-    TASKS[task_id] = {"status": "processing", "buffer": "V7.5 15-Agent Orkestratör başlatılıyor...", "agent_pipeline": [], "handoff_logs": []}
+    TASKS[task_id] = {"status": "processing", "buffer": "V8 Bütünleşik 4 Birim Orkestratörü başlatılıyor...", "agent_pipeline": [], "handoff_logs": []}
     asyncio.create_task(process_task(task_id, user, payload, raw_in_tokens))
     return {"task_id": task_id, "role": user["role"], "username": user["username"]}
 
