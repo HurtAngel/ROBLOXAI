@@ -1407,9 +1407,8 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
 
     # V6: her aşamada SADECE izinli araçlar (sunucu tarafı filtre)
     STAGE1_ALLOWED = {"create_instance", "edit_instance", "delete_instance", "insert_asset", "terrain_fill", "run_luau", "set_camera", "spawn_rig"}
-    STAGE2_ALLOWED = {"create_animation", "create_cutscene", "set_camera", "create_instance", "setup_camera"}
+    STAGE2_ALLOWED = {"create_animation", "setup_camera"}
     STAGE3_ALLOWED = {"write_script", "edit_script", "delete_instance", "create_instance"}
-    STAGE2_INSTANCE_CLASSES = {"BlurEffect", "DepthOfFieldEffect", "BloomEffect", "ColorCorrectionEffect", "SunRaysEffect", "Atmosphere", "Sky"}
 
     def summarize_actions(acts):
         out = []
@@ -1555,8 +1554,6 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                         continue
                     t = a.get("type")
                     if t not in STAGE2_ALLOWED:
-                        continue
-                    if t == "create_instance" and (str(a.get("parent") or "") != "Lighting" or a.get("class") not in STAGE2_INSTANCE_CLASSES):
                         continue
                     s2_actions.append(a)
 

@@ -59,7 +59,7 @@ STAGE1_PROMPT = (
 )
 
 STAGE2_PROMPT = (
-    "STAGE 2/3 — ANIMATIONS, GAME CAMERA AND VISUAL FX. Only these action types are allowed:\n"
+    "STAGE 2/3 — ANIMATIONS AND GAME CAMERA. Only these two action types are allowed:\n"
     "- {\"type\":\"create_animation\",\"name\":\"Kick\",\"preset\":\"kick\",\"rig_path\":\"Workspace.RigName\",\"speed\":1,\"intensity\":1}\n"
     "    Available presets (smooth, tested, R6 and R15 automatically): idle, walk, run, jump, kick, shoot, throw, swing, slash, jab, punch, block, guard, wave, sit, dance, celebrate, cheer.\n"
     "    ALWAYS prefer a preset. Only for something no preset covers, give custom \"keyframes\":[{\"time\":0,\"poses\":{\"RightUpperArm\":{\"rot\":[x,y,z]}}}] using the rig's exact joint names.\n"
@@ -67,9 +67,8 @@ STAGE2_PROMPT = (
     "- {\"type\":\"setup_camera\",\"mode\":\"third_person|follow|first_person|top_down|isometric|side_scroller|broadcast\",\"distance\":11,\"shoulder_offset\":2.2,\"fov\":70,\"sprint_fov\":84,\"lock_mouse\":false,\"sprint\":true,\"walk_speed\":16,\"sprint_speed\":26,\"target_path\":\"Workspace.Ball\"}\n"
     "    third_person = over-the-shoulder action camera (lock_mouse true = shooter style). broadcast = TV sports camera following target_path (field long axis along X).\n"
     "    If the user asks for 3rd person / moving / dynamic camera, you MUST use setup_camera (never write a camera script).\n"
-    "- {\"type\":\"create_cutscene\",\"name\":\"Intro\",\"disable_character\":false,\"loop\":false,\"cinematic_bars\":true,\"keyframes\":[{\"time\":0,\"pos\":[x,y,z],\"look_at\":[x,y,z],\"fov\":70,\"easing\":\"Cubic\",\"shake\":0}]}  (only for cinematic movies/showcases)\n"
-    "- {\"type\":\"create_instance\",\"class\":\"BloomEffect|ColorCorrectionEffect|SunRaysEffect|Atmosphere|DepthOfFieldEffect\",\"name\":\"...\",\"parent\":\"Lighting\",\"properties\":{...}}\n"
     "RULES:\n"
+    "- ONLY emit `create_animation` and `setup_camera` actions in this stage (never `create_instance` or `spawn_rig`).\n"
     "- Create every animation the blueprint/gameplay needs (e.g. football: Kick, Celebrate; fighting: Jab, Block; RPG: Swing). Give them clear names.\n"
     "- A playable game should almost always get a setup_camera action.\n"
 )
@@ -78,10 +77,13 @@ STAGE3_PROMPT = (
     "STAGE 3/3 — GAMEPLAY SCRIPTS AND UI. Only these action types are allowed:\n"
     "- {\"type\":\"write_script\",\"script_type\":\"Script|LocalScript|ModuleScript\",\"name\":\"...\",\"parent\":\"ServerScriptService|StarterPlayer.StarterPlayerScripts|StarterGui|ReplicatedStorage\",\"source\":\"...\"}\n"
     "- {\"type\":\"edit_script\",\"path\":\"...\",\"source\":\"full new source\"}\n"
-    "- {\"type\":\"create_instance\",\"class\":\"RemoteEvent|RemoteFunction|ScreenGui|Frame|TextLabel|TextButton|UICorner|UIStroke|IntValue|StringValue\",\"name\":\"...\",\"parent\":\"ReplicatedStorage|StarterGui|StarterGui.HUD\",\"properties\":{...}}\n"
+    "- {\"type\":\"create_instance\",\"class\":\"RemoteEvent|RemoteFunction|BindableEvent|ScreenGui|Frame|TextLabel|TextButton|UICorner|UIStroke|IntValue|StringValue\",\"name\":\"...\",\"parent\":\"ReplicatedStorage|ServerStorage|StarterGui|StarterGui.HUD\",\"properties\":{...}}\n"
     "- {\"type\":\"delete_instance\",\"path\":\"...\"}\n"
     "RULES:\n"
     "- Write COMPLETE, working Luau. No placeholders, no TODOs. Use task.wait, RunService.Heartbeat, :Connect. Use WaitForChild for anything created at runtime or in other services.\n"
+    "- Always define every service at the top of the script before using it (e.g. `local Players = game:GetService(\"Players\")`, `local ReplicatedStorage = game:GetService(\"ReplicatedStorage\")`, `local RunService = game:GetService(\"RunService\")`). NEVER reference `Players` without declaring it first.\n"
+    "- NEVER connect `.Touched` to a `Model` (Models do not have a `.Touched` event!). Always connect `.Touched` to a `BasePart`/`Part` inside the Model (e.g. a specific hitbox/sensor `Part` or `model.PrimaryPart`).\n"
+    "- NEVER use `RemoteEvent.Event` between server scripts (`RemoteEvent` is strictly client-server and has no `.Event` signal). For server-to-server communication, use a `BindableEvent` (`.Event` / `:Fire()`) or a shared `ModuleScript`.\n"
     "- Server authority: scoring, timers, rounds, damage, spawning live in a Script in ServerScriptService. Input and UI live in a LocalScript in StarterPlayer.StarterPlayerScripts. Communicate with RemoteEvents in ReplicatedStorage.\n"
     "- ScreenGuis you create must have \"Enabled\": false in properties and be enabled from a LocalScript at runtime (or build the UI entirely inside the LocalScript under PlayerGui — preferred).\n"
     "- Play animations ONLY via AIKit.PlayAnim(...). Camera effects ONLY via AIKit.Shake/FovPunch/Blur. Do NOT write camera scripts if setup_camera was used.\n"
