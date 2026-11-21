@@ -386,45 +386,159 @@ end
 promptBox:GetPropertyChangedSignal("Text"):Connect(updatePromptScrollSize)
 promptScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePromptScrollSize)
 
--- 5. PROMPT ZENGİNLEŞTİRİCİ ANAHTARI + ANA ÇALIŞTIR + İKİLİ KURTARMA ÇUBUĞU
+-- 5. KEŞİF MODU + PROMPT ZENGİNLEŞTİRİCİ + KEŞİF & NOT PANELİ + ÇALIŞTIRMA BUTONLARI
+local discoveryModeEnabled = true
 local expandPromptEnabled = false
+
+local togglesRow = Instance.new("Frame")
+togglesRow.LayoutOrder = 13
+togglesRow.Size = UDim2.new(1, 0, 0, 30)
+togglesRow.BackgroundTransparency = 1
+togglesRow.Parent = root
+
+local discoveryToggleBtn = Instance.new("TextButton")
+discoveryToggleBtn.Size = UDim2.new(0.49, 0, 1, 0)
+discoveryToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 64, 115)
+discoveryToggleBtn.Text = "🧭 Keşif Soruları: AÇIK"
+discoveryToggleBtn.TextColor3 = Color3.fromRGB(215, 235, 255)
+discoveryToggleBtn.Font = Enum.Font.GothamBold
+discoveryToggleBtn.TextSize = 10
+discoveryToggleBtn.Parent = togglesRow
+styleBox(discoveryToggleBtn)
+
 local expandToggleBtn = Instance.new("TextButton")
-expandToggleBtn.LayoutOrder = 12
-expandToggleBtn.Size = UDim2.new(1, 0, 0, 30)
+expandToggleBtn.Size = UDim2.new(0.49, 0, 1, 0)
+expandToggleBtn.Position = UDim2.new(0.51, 0, 0, 0)
 expandToggleBtn.BackgroundColor3 = C.CARD
-expandToggleBtn.Text = "✨ Prompt Zenginleştirici: KAPALI"
+expandToggleBtn.Text = "✨ Zenginleştirici: KAPALI"
 expandToggleBtn.TextColor3 = C.MUTED
 expandToggleBtn.Font = Enum.Font.GothamBold
-expandToggleBtn.TextSize = 11
-expandToggleBtn.Parent = root
+expandToggleBtn.TextSize = 10
+expandToggleBtn.Parent = togglesRow
 styleBox(expandToggleBtn)
 
 expandToggleBtn.MouseButton1Click:Connect(function()
 	expandPromptEnabled = not expandPromptEnabled
 	if expandPromptEnabled then
-		expandToggleBtn.Text = "✨ Prompt Zenginleştirici: AÇIK (4 Başlıklı Detaylı Plan)"
+		expandToggleBtn.Text = "✨ Zenginleştirici: AÇIK"
 		expandToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 78, 56)
 		expandToggleBtn.TextColor3 = Color3.fromRGB(205, 255, 225)
 	else
-		expandToggleBtn.Text = "✨ Prompt Zenginleştirici: KAPALI"
+		expandToggleBtn.Text = "✨ Zenginleştirici: KAPALI"
 		expandToggleBtn.BackgroundColor3 = C.CARD
 		expandToggleBtn.TextColor3 = C.MUTED
 	end
 end)
 
+-- ETKİLEŞİMLİ KEŞİF & PROJE NOTLARI PANELİ (Main Agent soruları ve notları burada görünür)
+local discoveryCard = Instance.new("Frame")
+discoveryCard.LayoutOrder = 14
+discoveryCard.Size = UDim2.new(1, 0, 0, 215)
+discoveryCard.BackgroundColor3 = Color3.fromRGB(20, 28, 42)
+discoveryCard.Visible = false
+discoveryCard.Parent = root
+styleBox(discoveryCard, 8)
+
+local discPad = Instance.new("UIPadding")
+discPad.PaddingTop = UDim.new(0, 8)
+discPad.PaddingBottom = UDim.new(0, 8)
+discPad.PaddingLeft = UDim.new(0, 8)
+discPad.PaddingRight = UDim.new(0, 8)
+discPad.Parent = discoveryCard
+
+local discHeader = Instance.new("TextLabel")
+discHeader.Size = UDim2.new(0.72, 0, 0, 18)
+discHeader.BackgroundTransparency = 1
+discHeader.Text = "🧭 MAIN AGENT KEŞİF & PROJE NOTLARI"
+discHeader.TextColor3 = Color3.fromRGB(147, 197, 253)
+discHeader.Font = Enum.Font.GothamBold
+discHeader.TextSize = 11
+discHeader.TextXAlignment = Enum.TextXAlignment.Left
+discHeader.Parent = discoveryCard
+
+local cancelDiscoverBtn = Instance.new("TextButton")
+cancelDiscoverBtn.Size = UDim2.new(0.26, 0, 0, 18)
+cancelDiscoverBtn.Position = UDim2.new(0.74, 0, 0, 0)
+cancelDiscoverBtn.BackgroundColor3 = Color3.fromRGB(68, 30, 36)
+cancelDiscoverBtn.Text = "✖ İptal"
+cancelDiscoverBtn.TextColor3 = Color3.fromRGB(252, 165, 165)
+cancelDiscoverBtn.Font = Enum.Font.GothamBold
+cancelDiscoverBtn.TextSize = 10
+cancelDiscoverBtn.Parent = discoveryCard
+styleBox(cancelDiscoverBtn, 4)
+
+local discoveryScroll = Instance.new("ScrollingFrame")
+discoveryScroll.Size = UDim2.new(1, 0, 1, -24)
+discoveryScroll.Position = UDim2.new(0, 0, 0, 24)
+discoveryScroll.BackgroundColor3 = C.INPUT
+discoveryScroll.BorderSizePixel = 0
+discoveryScroll.ScrollBarThickness = 6
+discoveryScroll.CanvasSize = UDim2.new(0, 0, 0, 175)
+discoveryScroll.Parent = discoveryCard
+styleBox(discoveryScroll, 6)
+
+local discoveryText = Instance.new("TextBox")
+discoveryText.Size = UDim2.new(1, -10, 0, 175)
+discoveryText.BackgroundTransparency = 1
+discoveryText.Text = ""
+discoveryText.TextColor3 = Color3.fromRGB(224, 242, 254)
+discoveryText.Font = Enum.Font.Gotham
+discoveryText.TextSize = 11
+discoveryText.TextWrapped = true
+discoveryText.MultiLine = true
+discoveryText.TextEditable = false
+discoveryText.ClearTextOnFocus = false
+discoveryText.TextXAlignment = Enum.TextXAlignment.Left
+discoveryText.TextYAlignment = Enum.TextYAlignment.Top
+discoveryText.Parent = discoveryScroll
+
+local dTxtPad = Instance.new("UIPadding")
+dTxtPad.PaddingTop = UDim.new(0, 6)
+dTxtPad.PaddingBottom = UDim.new(0, 6)
+dTxtPad.PaddingLeft = UDim.new(0, 6)
+dTxtPad.PaddingRight = UDim.new(0, 6)
+dTxtPad.Parent = discoveryText
+
+local function setDiscoveryDisplay(txt)
+	discoveryText.Text = txt or ""
+	local availW = math.max(200, discoveryScroll.AbsoluteSize.X - 24)
+	local ok, bounds = pcall(function()
+		return TextService:GetTextSize(discoveryText.Text, discoveryText.TextSize, discoveryText.Font, Vector2.new(availW, 100000))
+	end)
+	local h = math.max(175, (ok and bounds and bounds.Y or 0) + 24)
+	discoveryText.Size = UDim2.new(1, -10, 0, h)
+	discoveryScroll.CanvasSize = UDim2.new(0, 0, 0, h)
+end
+
+local mainActionRow = Instance.new("Frame")
+mainActionRow.LayoutOrder = 15
+mainActionRow.Size = UDim2.new(1, 0, 0, 38)
+mainActionRow.BackgroundTransparency = 1
+mainActionRow.Parent = root
+
 local runBtn = Instance.new("TextButton")
-runBtn.LayoutOrder = 13
-runBtn.Size = UDim2.new(1, 0, 0, 38)
+runBtn.Size = UDim2.new(0.56, 0, 1, 0)
 runBtn.BackgroundColor3 = C.ACCENT
-runBtn.Text = "▶ Çalıştır"
+runBtn.Text = "🧭 Keşfet & Planla"
 runBtn.TextColor3 = Color3.new(1, 1, 1)
 runBtn.Font = Enum.Font.GothamBold
-runBtn.TextSize = 13
-runBtn.Parent = root
+runBtn.TextSize = 12
+runBtn.Parent = mainActionRow
 styleBox(runBtn)
 
+local skipAndBuildBtn = Instance.new("TextButton")
+skipAndBuildBtn.Size = UDim2.new(0.42, 0, 1, 0)
+skipAndBuildBtn.Position = UDim2.new(0.58, 0, 0, 0)
+skipAndBuildBtn.BackgroundColor3 = C.GREEN
+skipAndBuildBtn.Text = "⚡ Soruları Atla ve Üret"
+skipAndBuildBtn.TextColor3 = Color3.new(1, 1, 1)
+skipAndBuildBtn.Font = Enum.Font.GothamBold
+skipAndBuildBtn.TextSize = 11
+skipAndBuildBtn.Parent = mainActionRow
+styleBox(skipAndBuildBtn)
+
 local recoveryRow = Instance.new("Frame")
-recoveryRow.LayoutOrder = 14
+recoveryRow.LayoutOrder = 16
 recoveryRow.Size = UDim2.new(1, 0, 0, 32)
 recoveryRow.BackgroundTransparency = 1
 recoveryRow.Parent = root
@@ -462,7 +576,7 @@ clearMemBtn.Parent = recoveryRow
 styleBox(clearMemBtn)
 
 local resetSceneBtn = Instance.new("TextButton")
-resetSceneBtn.LayoutOrder = 15
+resetSceneBtn.LayoutOrder = 17
 resetSceneBtn.Size = UDim2.new(1, 0, 0, 30)
 resetSceneBtn.BackgroundColor3 = Color3.fromRGB(92, 28, 34)
 resetSceneBtn.Text = "🗑️ Sahneyi Sıfırla (Tek Tıkla Temizle)"
@@ -473,7 +587,7 @@ resetSceneBtn.Parent = root
 styleBox(resetSceneBtn)
 
 local longRow = Instance.new("Frame")
-longRow.LayoutOrder = 16
+longRow.LayoutOrder = 18
 longRow.Size = UDim2.new(1, 0, 0, 30)
 longRow.BackgroundTransparency = 1
 longRow.Parent = root
@@ -499,14 +613,23 @@ runLongBtn.TextSize = 10
 runLongBtn.Parent = longRow
 styleBox(runLongBtn)
 
--- 6. CANLI AKIŞ
-makeLabel("CANLI AKIŞ & İŞLEM RAPORU", 16)
+-- 6. CANLI AKIŞ & 13 ALT AGENT BORU HATTI RAPORU
+makeLabel("CANLI AKIŞ & 13 ALT AGENT İŞLEM RAPORU", 19)
+
+local logScroll = Instance.new("ScrollingFrame")
+logScroll.LayoutOrder = 20
+logScroll.Size = UDim2.new(1, 0, 0, 360)
+logScroll.BackgroundColor3 = C.INPUT
+logScroll.BorderSizePixel = 0
+logScroll.ScrollBarThickness = 6
+logScroll.CanvasSize = UDim2.new(0, 0, 0, 360)
+logScroll.Parent = root
+styleBox(logScroll)
 
 local logBox = Instance.new("TextBox")
-logBox.LayoutOrder = 17
-logBox.Size = UDim2.new(1, 0, 0, 310)
-logBox.BackgroundColor3 = C.INPUT
-logBox.Text = "Hazır."
+logBox.Size = UDim2.new(1, -10, 0, 360)
+logBox.BackgroundTransparency = 1
+logBox.Text = "Hazır. (V7: 1 Main Agent + 13 Uzman Alt Agent)"
 logBox.TextColor3 = Color3.fromRGB(167, 243, 208)
 logBox.Font = Enum.Font.Code
 logBox.TextSize = 11
@@ -516,14 +639,27 @@ logBox.TextEditable = false
 logBox.ClearTextOnFocus = false
 logBox.TextXAlignment = Enum.TextXAlignment.Left
 logBox.TextYAlignment = Enum.TextYAlignment.Top
-logBox.Parent = root
-styleBox(logBox)
+logBox.Parent = logScroll
 
 local lPad = Instance.new("UIPadding")
 lPad.PaddingTop = UDim.new(0, 8)
+lPad.PaddingBottom = UDim.new(0, 8)
 lPad.PaddingLeft = UDim.new(0, 8)
 lPad.PaddingRight = UDim.new(0, 8)
 lPad.Parent = logBox
+
+local function updateLogScrollSize()
+	local txt = logBox.Text or ""
+	local availW = math.max(200, logScroll.AbsoluteSize.X - 24)
+	local ok, bounds = pcall(function()
+		return TextService:GetTextSize(txt, logBox.TextSize, logBox.Font, Vector2.new(availW, 200000))
+	end)
+	local h = math.max(360, (ok and bounds and bounds.Y or 0) + 32)
+	logBox.Size = UDim2.new(1, -10, 0, h)
+	logScroll.CanvasSize = UDim2.new(0, 0, 0, h)
+end
+logBox:GetPropertyChangedSignal("Text"):Connect(updateLogScrollSize)
+logScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateLogScrollSize)
 
 Selection.SelectionChanged:Connect(function()
 	selectionBadge.Text = "Seçili Nesne: " .. tostring(#Selection:Get())
@@ -773,18 +909,45 @@ local function parseColor3(val, def)
 	return def
 end
 
-local function convertProp(propName, val)
+local function convertProp(propName, val, obj)
+	local low = string.lower(tostring(propName or ""))
+	local isVfx = obj and (obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam"))
+	if isVfx then
+		if low == "color" and type(val) == "table" and #val >= 3 then
+			return ColorSequence.new(parseColor3(val, Color3.fromRGB(255, 255, 255)))
+		elseif (low == "size" or low == "transparency") and type(val) == "number" then
+			return NumberSequence.new(val)
+		elseif (low == "size" or low == "transparency") and type(val) == "table" and #val == 2 then
+			return NumberSequence.new(tonumber(val[1]) or 0, tonumber(val[2]) or 0)
+		elseif (low == "lifetime" or low == "speed" or low == "rotspeed" or low == "rotation") then
+			if type(val) == "number" then return NumberRange.new(val)
+			elseif type(val) == "table" and #val >= 2 then return NumberRange.new(tonumber(val[1]) or 0, tonumber(val[2]) or 1) end
+		end
+	end
 	if type(val) == "table" then
 		if #val == 4 then return UDim2.new(val[1], val[2], val[3], val[4]) end
 		if #val == 3 then
-			if string.find(string.lower(propName), "color") then return parseColor3(val, Color3.fromRGB(255, 255, 255)) end
+			if string.find(low, "color") or low == "ambient" or low == "outdoorambient" or low == "decay" then
+				return parseColor3(val, Color3.fromRGB(255, 255, 255))
+			end
 			return Vector3.new(val[1], val[2], val[3])
 		end
-		if #val == 2 then return UDim.new(val[1], val[2]) end
+		if #val == 2 then
+			if low == "anchorpoint" or low == "spreadangle" then return Vector2.new(val[1], val[2]) end
+			return UDim.new(val[1], val[2])
+		end
 	elseif type(val) == "string" then
 		if propName == "Material" and Enum.Material[val] then return Enum.Material[val] end
 		if propName == "Font" and Enum.Font[val] then return Enum.Font[val] end
 		if propName == "Shape" and Enum.PartType[val] then return Enum.PartType[val] end
+		if propName == "TextXAlignment" and Enum.TextXAlignment[val] then return Enum.TextXAlignment[val] end
+		if propName == "TextYAlignment" and Enum.TextYAlignment[val] then return Enum.TextYAlignment[val] end
+		if propName == "FillDirection" and Enum.FillDirection[val] then return Enum.FillDirection[val] end
+		if propName == "HorizontalAlignment" and Enum.HorizontalAlignment[val] then return Enum.HorizontalAlignment[val] end
+		if propName == "VerticalAlignment" and Enum.VerticalAlignment[val] then return Enum.VerticalAlignment[val] end
+		if propName == "SortOrder" and Enum.SortOrder[val] then return Enum.SortOrder[val] end
+		if propName == "KeyboardKeyCode" and Enum.KeyCode[val] then return Enum.KeyCode[val] end
+		if propName == "DepthMode" and Enum.HighlightDepthMode[val] then return Enum.HighlightDepthMode[val] end
 	end
 	return val
 end
@@ -1978,7 +2141,7 @@ local function executeActions(actions)
 				if obj:IsA("BasePart") then obj.Anchored = true end
 				if obj:IsA("ScreenGui") then obj.Enabled = false end
 				if act.properties then
-					for k, v in pairs(act.properties) do pcall(function() obj[k] = convertProp(k, v) end) end
+					for k, v in pairs(act.properties) do pcall(function() obj[k] = convertProp(k, v, obj) end) end
 				end
 				local targetParent = resolveOrSearchPath(act.parent)
 				if obj:IsA("LocalScript") and (targetParent == StarterPlayer or act.parent == "StarterPlayer") then
@@ -1990,7 +2153,7 @@ local function executeActions(actions)
 			elseif t == "edit_instance" then
 				local target = resolveOrSearchPath(act.path)
 				if target and act.properties then
-					for k, v in pairs(act.properties) do pcall(function() target[k] = convertProp(k, v) end) end
+					for k, v in pairs(act.properties) do pcall(function() target[k] = convertProp(k, v, target) end) end
 					table.insert(logs, "* Düzenlendi: " .. target.Name)
 				end
 
@@ -2138,15 +2301,143 @@ local function executeActions(actions)
 	return table.concat(logs, "\n")
 end
 
-local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetries, skipExpand)
+-- ============================================================
+-- V7 ETKİLEŞİMLİ KEŞİF (ADIM A) & 14-AGENT ÜRETİM HATTI (ADIM B)
+-- ============================================================
+local activeDiscoverySessionId = nil
+local activeProjectNotes = {}
+local activeDiscoveryConversation = {}
+local activeInitialPrompt = ""
+
+local function setIdleButtons()
+	if activeDiscoverySessionId then
+		runBtn.Text = "💬 Cevapları Gönder"
+		runBtn.BackgroundColor3 = Color3.fromRGB(37, 99, 235)
+		promptBox.PlaceholderText = "Main Agent'ın sorularına cevabını buraya yazıp '💬 Cevapları Gönder'e bas (veya '⚡ Soruları Atla ve Üret')..."
+	elseif discoveryModeEnabled then
+		runBtn.Text = "🧭 Keşfet & Planla"
+		runBtn.BackgroundColor3 = C.ACCENT
+		promptBox.PlaceholderText = "Ne yapmak istiyorsunuz? (Main Agent önce 3-5 soru sorup Proje Notları çıkarır)"
+	else
+		runBtn.Text = "▶ Hemen Üret"
+		runBtn.BackgroundColor3 = C.ACCENT
+		promptBox.PlaceholderText = "Ne yapmak istiyorsunuz? (Doğrudan 14-Agent üretim hattı başlar)"
+	end
+end
+
+local function resetDiscoveryState()
+	activeDiscoverySessionId = nil
+	activeProjectNotes = {}
+	activeDiscoveryConversation = {}
+	activeInitialPrompt = ""
+	discoveryCard.Visible = false
+	setDiscoveryDisplay("")
+	setIdleButtons()
+end
+
+discoveryToggleBtn.MouseButton1Click:Connect(function()
+	discoveryModeEnabled = not discoveryModeEnabled
+	if discoveryModeEnabled then
+		discoveryToggleBtn.Text = "🧭 Keşif Soruları: AÇIK"
+		discoveryToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 64, 115)
+		discoveryToggleBtn.TextColor3 = Color3.fromRGB(215, 235, 255)
+	else
+		discoveryToggleBtn.Text = "🧭 Keşif Soruları: KAPALI"
+		discoveryToggleBtn.BackgroundColor3 = C.CARD
+		discoveryToggleBtn.TextColor3 = C.MUTED
+		resetDiscoveryState()
+	end
+	setIdleButtons()
+end)
+
+cancelDiscoverBtn.MouseButton1Click:Connect(function()
+	resetDiscoveryState()
+	logBox.Text = "🧭 Keşif oturumu iptal edildi. Yeni bir istek yazabilirsin."
+end)
+
+local function formatProjectNotesText(notes, questions, assistantMsg, previewActive, previewSkipped)
+	local lines = {}
+	if assistantMsg and assistantMsg ~= "" then
+		table.insert(lines, "💬 " .. tostring(assistantMsg))
+	end
+	if type(questions) == "table" and #questions > 0 then
+		table.insert(lines, "\n❓ SORULAR (Aşağıdaki kutuya cevap yazıp '💬 Cevapları Gönder'e bas):")
+		for _, q in ipairs(questions) do
+			table.insert(lines, "  " .. tostring(q))
+		end
+	end
+	if type(notes) == "table" and next(notes) ~= nil then
+		table.insert(lines, "\n📋 PROJE NOTLARI (PROJECT_NOTES):")
+		if notes.game_title and notes.game_title ~= "" then table.insert(lines, "  • Başlık: " .. tostring(notes.game_title)) end
+		if notes.core_concept and notes.core_concept ~= "" then table.insert(lines, "  • Konsept: " .. tostring(notes.core_concept)) end
+		if notes.camera_preference and notes.camera_preference ~= "" then table.insert(lines, "  • Kamera: " .. tostring(notes.camera_preference)) end
+		if notes.atmosphere_theme and notes.atmosphere_theme ~= "" then table.insert(lines, "  • Atmosfer: " .. tostring(notes.atmosphere_theme)) end
+		if notes.win_lose_conditions and notes.win_lose_conditions ~= "" then table.insert(lines, "  • Kazanma/Kaybetme: " .. tostring(notes.win_lose_conditions)) end
+		if type(notes.confirmed_features) == "table" and #notes.confirmed_features > 0 then
+			table.insert(lines, "  • Kesin Özellikler: " .. table.concat(notes.confirmed_features, " | "))
+		end
+		if type(notes.controls_and_mechanics) == "table" and #notes.controls_and_mechanics > 0 then
+			table.insert(lines, "  • Kontroller/Mekanik: " .. table.concat(notes.controls_and_mechanics, " | "))
+		end
+		if type(notes.negative_constraints) == "table" and #notes.negative_constraints > 0 then
+			table.insert(lines, "  🚫 KESİN YASAKLAR: " .. table.concat(notes.negative_constraints, " | "))
+		end
+	end
+	if type(previewActive) == "table" and #previewActive > 0 then
+		table.insert(lines, "\n✅ Planlanan Aktif Agent'lar: " .. table.concat(previewActive, ", "))
+	end
+	if type(previewSkipped) == "table" and next(previewSkipped) ~= nil then
+		local skipList = {}
+		for k, v in pairs(previewSkipped) do
+			table.insert(skipList, tostring(k) .. " (" .. tostring(v) .. ")")
+		end
+		table.insert(lines, "⏭️ Pas Geçilecekler (PASS): " .. table.concat(skipList, ", "))
+	end
+	return table.concat(lines, "\n")
+end
+
+local function formatAgentPipelineSummary(pipeline, handoffs)
+	if type(pipeline) ~= "table" or #pipeline == 0 then return "" end
+	local iconMap = {
+		running = "🔄 ÇALIŞIYOR",
+		done = "✅ TAMAM",
+		pass = "⏭️ PASS",
+		active = "⏳ AKTİF",
+		pending = "· BEKLİYOR",
+		error = "❌ HATA",
+	}
+	local lines = { "=== 14-AGENT BORU HATTI ÖZETİ ===" }
+	for _, p in ipairs(pipeline) do
+		local st = iconMap[p.status] or tostring(p.status)
+		local extra = ""
+		if p.status == "done" then
+			extra = string.format(" (%d aksiyon)", tonumber(p.actions_count) or 0)
+		elseif p.status == "pass" and p.reason and p.reason ~= "" then
+			extra = " — " .. tostring(p.reason)
+		end
+		table.insert(lines, string.format("  %s: %s%s", tostring(p.title or p.id), st, extra))
+	end
+	if type(handoffs) == "table" and #handoffs > 0 then
+		table.insert(lines, "\n🔗 SHARED_MANIFEST VERİ AKTARIMLARI:")
+		for _, h in ipairs(handoffs) do
+			table.insert(lines, "  • " .. tostring(h))
+		end
+	end
+	return table.concat(lines, "\n")
+end
+
+local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetries, skipExpand, notesOverride, sessionOverride, convOverride)
 	stepCount = stepCount or 1
 	syntaxRetries = syntaxRetries or 0
 	if stepCount > 6 then
 		logBox.Text = "Maksimum ajan adımına (6) ulaşıldı."
-		runBtn.Text = "▶ Çalıştır"
-		runBtn.BackgroundColor3 = C.ACCENT
+		setIdleButtons()
 		return
 	end
+
+	local notesToSend = notesOverride or activeProjectNotes or {}
+	local sessionToSend = sessionOverride or activeDiscoverySessionId or ""
+	local convToSend = convOverride or activeDiscoveryConversation or {}
 
 	if expandPromptEnabled and stepCount == 1 and syntaxRetries == 0 and not skipExpand then
 		runBtn.Text = "✨ Zenginleştiriliyor..."
@@ -2163,7 +2454,7 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 			local decOk, expData = pcall(function() return HttpService:JSONDecode(expRes.Body) end)
 			if decOk and type(expData) == "table" and expData.expanded_prompt and expData.expanded_prompt ~= "" then
 				customPrompt = expData.expanded_prompt
-				logBox.Text = string.format("✨ Zenginleştirilmiş Tasarım (%s):\n\n%s\n\n⏳ Ana üretim hattı (Aşama 0-1-2-3) başlatılıyor...", tostring(expData.model or "expander"), customPrompt)
+				logBox.Text = string.format("✨ Zenginleştirilmiş Tasarım (%s):\n\n%s\n\n⏳ 14-Agent üretim hattı başlatılıyor...", tostring(expData.model or "expander"), customPrompt)
 			else
 				logBox.Text = "⚠️ Zenginleştirici yanıtı çözümlenemedi, orijinal prompt ile devam ediliyor..."
 			end
@@ -2175,6 +2466,9 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 
 	local body = HttpService:JSONEncode({
 		prompt = customPrompt,
+		session_id = sessionToSend,
+		project_notes = notesToSend,
+		discovery_conversation = convToSend,
 		thinking_mode = thinkingMode,
 		is_syntax_repair = syntaxRetries > 0,
 		directives = {
@@ -2192,7 +2486,7 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 
 	local ok, res = pcall(function()
 		return HttpService:RequestAsync({
-			Url = DEFAULT_URL .. "/api/agent/execute",
+			Url = DEFAULT_URL .. "/agent/execute",
 			Method = "POST",
 			Headers = getHeaders(true),
 			Body = body
@@ -2201,16 +2495,14 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 
 	if not ok or not res.Success then
 		logBox.Text = "Hata: " .. tostring(res and res.Body or res)
-		runBtn.Text = "▶ Çalıştır"
-		runBtn.BackgroundColor3 = C.ACCENT
+		setIdleButtons()
 		return
 	end
 
 	local startData = HttpService:JSONDecode(res.Body)
 	if startData.error then
 		logBox.Text = "Hata: " .. startData.error
-		runBtn.Text = "▶ Çalıştır"
-		runBtn.BackgroundColor3 = C.ACCENT
+		setIdleButtons()
 		return
 	end
 
@@ -2222,7 +2514,7 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 			task.wait(0.8)
 			local pOk, pRes = pcall(function()
 				return HttpService:RequestAsync({
-					Url = DEFAULT_URL .. "/api/agent/poll?task_id=" .. taskId,
+					Url = DEFAULT_URL .. "/agent/poll?task_id=" .. taskId,
 					Method = "GET",
 					Headers = getHeaders(false)
 				})
@@ -2253,7 +2545,7 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 						end
 						if newlyLoaded > 0 then
 							logBox.Text = "Model ilgili dosyaları okuyor (" .. table.concat(needFiles, ", ") .. ")..."
-							runAgentWorkflow(customPrompt, loadedFiles, stepCount + 1, syntaxRetries)
+							runAgentWorkflow(customPrompt, loadedFiles, stepCount + 1, syntaxRetries, true, notesToSend, sessionToSend, convToSend)
 							return
 						end
 					end
@@ -2263,25 +2555,93 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 					if #syntaxErrs > 0 and syntaxRetries < 2 then
 						logBox.Text = "⚠️ Sözdizimi hatası yakalandı, sahne bozulmadan arka planda sessizce onarılıyor...\n" .. table.concat(syntaxErrs, "\n")
 						local repairPrompt = customPrompt .. "\n\n[OTOMATİK SYNTAX ONARIMI]: Az önce ürettiğin Luau kodunda şu sözdizimi hataları tespit edildi, lütfen tüm hataları düzeltip temiz JSON döndür:\n" .. table.concat(syntaxErrs, "\n")
-						runAgentWorkflow(repairPrompt, extraFiles, stepCount + 1, syntaxRetries + 1)
+						runAgentWorkflow(repairPrompt, extraFiles, stepCount + 1, syntaxRetries + 1, true, notesToSend, sessionToSend, convToSend)
 						return
 					end
 
 					local report = executeActions(result.actions or {})
-					logBox.Text = "Plan: " .. tostring(result.thought or "") .. "\n\n" .. report .. "\n\nTamamlandı."
+					local pipeSummary = formatAgentPipelineSummary(result.agent_pipeline or pData.agent_pipeline, result.handoff_logs or pData.handoff_logs)
+					logBox.Text = pipeSummary .. "\n\n[UYGULANAN STUDIO AKSİYONLARI]\n" .. report .. "\n\n[ÖZET]\n" .. tostring(result.thought or "") .. "\n\n✅ Tamamlandı."
+					resetDiscoveryState()
 					verifyAccount()
-					runBtn.Text = "▶ Çalıştır"
-					runBtn.BackgroundColor3 = C.ACCENT
 
 				elseif pData.status == "failed" then
 					polling = false
 					logBox.Text = "Hata: " .. tostring(pData.error)
-					runBtn.Text = "▶ Çalıştır"
-					runBtn.BackgroundColor3 = C.ACCENT
+					setIdleButtons()
 				end
 			end
 		end
 	end)
+end
+
+local function runDiscoveryStep(inputText)
+	runBtn.Text = "🧭 Analiz Ediliyor..."
+	runBtn.BackgroundColor3 = C.CARD
+	logBox.Text = "🧭 Main Agent isteğini analiz ediyor, sorular ve Proje Notları hazırlanıyor..."
+
+	if not activeDiscoverySessionId then
+		activeInitialPrompt = inputText
+	end
+
+	local body = HttpService:JSONEncode({
+		prompt = inputText,
+		session_id = activeDiscoverySessionId or "",
+		project_notes = activeProjectNotes or {},
+		conversation = activeDiscoveryConversation or {},
+		scene_hierarchy = collectSceneHierarchy(),
+		selected_items = gatherSelectedContext(),
+		thinking_mode = thinkingMode
+	})
+
+	local ok, res = pcall(function()
+		return HttpService:RequestAsync({
+			Url = DEFAULT_URL .. "/agent/discover",
+			Method = "POST",
+			Headers = getHeaders(true),
+			Body = body
+		})
+	end)
+
+	if not ok or not res or not res.Success then
+		logBox.Text = "⚠️ Keşif servisine ulaşılamadı (" .. tostring(res and res.Body or res) .. "). Doğrudan 14-Agent üretimine geçiliyor..."
+		runAgentWorkflow(activeInitialPrompt ~= "" and activeInitialPrompt or inputText, {}, 1, 0)
+		return
+	end
+
+	local decOk, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
+	if not decOk or type(data) ~= "table" or data.error then
+		logBox.Text = "⚠️ Keşif hatası: " .. tostring(type(data) == "table" and data.error or "JSON hatası")
+		setIdleButtons()
+		return
+	end
+
+	activeDiscoverySessionId = data.session_id
+	activeProjectNotes = type(data.project_notes) == "table" and data.project_notes or activeProjectNotes
+	activeDiscoveryConversation = type(data.conversation) == "table" and data.conversation or activeDiscoveryConversation
+
+	local displayTxt = formatProjectNotesText(
+		activeProjectNotes,
+		data.questions,
+		data.assistant_message or data.summary,
+		data.preview_active_agents,
+		data.preview_skipped_agents
+	)
+	discoveryCard.Visible = true
+	setDiscoveryDisplay(displayTxt)
+	promptBox.Text = ""
+
+	if data.status == "ready" then
+		logBox.Text = "✅ Proje Notları kesinleşti! Main Agent seçici yönlendirme ve 13 Alt Agent üretim hattını başlatıyor...\n\n" .. displayTxt
+		runBtn.Text = "🚀 Üretiliyor..."
+		runBtn.BackgroundColor3 = C.CARD
+		local finalPrompt = activeInitialPrompt ~= "" and activeInitialPrompt or inputText
+		lastSubmittedPrompt = finalPrompt
+		runAgentWorkflow(finalPrompt, {}, 1, 0, false, activeProjectNotes, activeDiscoverySessionId, activeDiscoveryConversation)
+	else
+		logBox.Text = string.format("🧭 Keşif Turu %d (%s) tamamlandı.\nSoruların cevaplarını yukarıdaki komut kutusuna yazıp '💬 Cevapları Gönder' butonuna basabilir veya '⚡ Soruları Atla ve Üret' ile hemen başlatabilirsin.", tonumber(data.round) or 1, tostring(data.model or "main_agent"))
+		setIdleButtons()
+	end
 end
 
 -- İKİLİ KURTARMA (GERİ AL & YENİDEN DENE) + YENİ OTURUM
@@ -2331,13 +2691,14 @@ clearMemBtn.MouseButton1Click:Connect(function()
 			Headers = getHeaders(false)
 		})
 	end)
+	resetDiscoveryState()
 	lastSubmittedPrompt = ""
 	capturedErrors = {}
 	fixErrBtn.Text = "Output Hatalarını AI'ya Gönder ve Düzelt (0 Hata)"
 	fixErrBtn.TextColor3 = C.MUTED
 	task.wait(0.3)
 	clearMemBtn.Text = "🧹 Yeni Oturum"
-	logBox.Text = "✅ Oturum sıfırlandı. Hafıza temizlendi, yeni mekaniğe hazırsın."
+	logBox.Text = "✅ Oturum ve keşif notları sıfırlandı. Hafıza temizlendi, yeni mekaniğe hazırsın."
 end)
 
 resetSceneBtn.MouseButton1Click:Connect(function()
@@ -2384,6 +2745,7 @@ resetSceneBtn.MouseButton1Click:Connect(function()
 			})
 		end)
 	end
+	resetDiscoveryState()
 	lastSubmittedPrompt = ""
 	capturedErrors = {}
 	fixErrBtn.Text = "Output Hatalarını AI'ya Gönder ve Düzelt (0 Hata)"
@@ -2424,23 +2786,50 @@ runLongBtn.MouseButton1Click:Connect(function()
 	end
 	plugin:SetSetting("V3_ClientKey", cleanKey())
 	lastSubmittedPrompt = txt
-	runBtn.Text = "Çalışıyor..."
+	runBtn.Text = "Üretiliyor..."
 	runBtn.BackgroundColor3 = C.CARD
-	logBox.Text = string.format("Uzun komut gönderiliyor (%d karakter)...", #txt)
+	logBox.Text = string.format("Uzun komut doğrudan 14-Agent hattına gönderiliyor (%d karakter)...", #txt)
 	runAgentWorkflow(txt, {}, 1, 0)
 end)
 
 runBtn.MouseButton1Click:Connect(function()
-	if cleanKey() == "" or promptBox.Text == "" then
-		logBox.Text = "Client API Key ve Komut alanları zorunludur."
+	if cleanKey() == "" or string.gsub(promptBox.Text or "", "%s+", "") == "" then
+		logBox.Text = "Client API Key ve Komut/Cevap alanları zorunludur."
 		return
 	end
 	plugin:SetSetting("V3_ClientKey", cleanKey())
-	lastSubmittedPrompt = promptBox.Text
-	runBtn.Text = "Çalışıyor..."
+	local txt = promptBox.Text
+	if discoveryModeEnabled or activeDiscoverySessionId then
+		runDiscoveryStep(txt)
+	else
+		lastSubmittedPrompt = txt
+		runBtn.Text = "Üretiliyor..."
+		runBtn.BackgroundColor3 = C.CARD
+		logBox.Text = string.format("14-Agent hattına gönderiliyor (%d karakter)...", #txt)
+		runAgentWorkflow(txt, {}, 1, 0)
+	end
+end)
+
+skipAndBuildBtn.MouseButton1Click:Connect(function()
+	if cleanKey() == "" then
+		logBox.Text = "Önce Client API Key girin."
+		return
+	end
+	local typed = promptBox.Text or ""
+	local basePrompt = activeInitialPrompt ~= "" and activeInitialPrompt or typed
+	if string.gsub(basePrompt, "%s+", "") == "" then
+		logBox.Text = "Önce ne yapmak istediğini komut kutusuna yaz."
+		return
+	end
+	if activeDiscoverySessionId and string.gsub(typed, "%s+", "") ~= "" then
+		basePrompt = basePrompt .. "\n\n[Kullanıcı Ek Notu]: " .. typed
+	end
+	plugin:SetSetting("V3_ClientKey", cleanKey())
+	lastSubmittedPrompt = basePrompt
+	runBtn.Text = "🚀 Üretiliyor..."
 	runBtn.BackgroundColor3 = C.CARD
-	logBox.Text = string.format("Komut gönderiliyor (%d karakter)...", #promptBox.Text)
-	runAgentWorkflow(promptBox.Text, {}, 1, 0)
+	logBox.Text = "⚡ Sorular atlandı — mevcut Proje Notları ile 14-Agent üretim hattı hemen başlatılıyor..."
+	runAgentWorkflow(basePrompt, {}, 1, 0, false, activeProjectNotes, activeDiscoverySessionId, activeDiscoveryConversation)
 end)
 
 fixErrBtn.MouseButton1Click:Connect(function()
@@ -2454,4 +2843,5 @@ fixErrBtn.MouseButton1Click:Connect(function()
 	runAgentWorkflow(errText, {}, 1, 0, true)
 end)
 
+setIdleButtons()
 task.spawn(verifyAccount)
