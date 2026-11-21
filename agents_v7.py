@@ -120,7 +120,8 @@ AGENT_REGISTRY: list[dict] = [
             "4) **ATMOSFER:** `PROJECT_NOTES` içinde gece/korku/yağmur/uzay gibi özel bir atmosfer istenmediyse `{\"type\":\"setup_atmosphere\"}` kullan; özel atmosfer istendiyse `Lighting` üzerinde kendin kur.\n"
             "5) **ANİMASYONLAR:** Oyunun ihtiyaç duyduğu tüm aksiyon animasyonlarını `create_animation` ile üret (geçerli presetler: `idle, walk, run, jump, kick, shoot, throw, swing, slash, jab, punch, block, guard, wave, sit, dance, celebrate, cheer` veya R15 özel `keyframes`; eylem animasyonlarında `priority: \"Action\"`).\n"
             "6) **EVRENSEL NPC KURALI:** `PROJECT_NOTES.negative_constraints` içinde NPC/bot açıkça yasaklandıysa ASLA `spawn_rig` kullanma. Ancak yasaklanmadıysa ve oyunun doğası NPC/rakip/muhafız/dost/satıcı gerektiriyorsa mutlaka `spawn_rig` ile sahneye uygun sayıda, renkli ve canlı NPC'ler yerleştir (hareketli olanlar için `behavior: \"follow_player\" | \"patrol\" | \"wander\" | \"follow_target\"`, gerekirse `attributes` içinde `AI_AttackRange`, `AI_AttackDamage`, `AI_AttackCooldown`, `AI_RespawnTime`, `RestrictX`/`RestrictZ` tanımla). İnsan oyuncu için asla `spawn_rig` üretme.\n"
-            "7) **VFX & TRAIL HAZIRLIĞI:** Gerekli objelere/silahlara `Trail` (iki `Attachment` arası), `ParticleEmitter` ve `PointLight` ekle; `WORLD_MANIFEST` içine tüm önemli obje, NPC rig ve animasyon isimlerini eksiksiz yaz."
+            "7) **VFX & TRAIL HAZIRLIĞI:** Gerekli objelere/silahlara `Trail` (iki `Attachment` arası), `ParticleEmitter` ve `PointLight` ekle; `WORLD_MANIFEST` içine tüm önemli obje, NPC rig ve animasyon isimlerini eksiksiz yaz.\n"
+            "8) **ASLA BOŞ SAHNE BIRAKMA:** `actions` dizisi asla boş olamaz! En azından oynanabilir zemin, çevre yapıları, sınır duvarları ve `SpawnLocation` mutlaka `run_luau` veya `create_instance` ile oluşturulmalıdır."
         ),
     },
     {
@@ -139,7 +140,9 @@ AGENT_REGISTRY: list[dict] = [
             "ZORUNLU KURALLAR:\n"
             "1) **HER HAREKET İÇİN ÖZGÜN KAMERA HİSSİYATI:** Tek bir sıradan shake yazıp bırakma! Oyundaki her farklı hareket/yetenek için ayrı, karakterli fonksiyonlar yaz:\n"
             "   - Örn. `CameraFX.PlayLightHit()` (keskin mikro-shake + hafif FOV daralma), `CameraFX.PlayDashZoom()` (hızlı FOV açılması + kısa Blur), `CameraFX.PlayHeavyImpact()` (güçlü yönlü sarsıntı + ColorCorrection flaşı + Blur + FOV punch), `CameraFX.PlayUltimateCutscene(character)` (kamerayı 0.8–1.4 sn `Scriptable` yapıp karakterin etrafında/alt-açıda dramatik biçimde `TweenService` ile döndürür/yakınlaştırır, ardından **MUTLAKA `CameraType = Enum.CameraType.Custom` ve normal FOV'a geri döner**!).\n"
-            "2) **GÜVENLİ GERİ DÖNÜŞ (ASLA KİLİTLİ KALMAZ):** `Scriptable` yapan her sinematik kamera fonksiyonu `pcall` ve `task.delay` ile bitişte kamerayı kesinlikle `Enum.CameraType.Custom` ve `FieldOfView = 70` haline geri döndürmelidir.\n"
+            "2) **KALICI ZOOM / NİŞAN VS GEÇİCİ EFEKT AYRIMI (ÇOK ÖNEMLİ):**\n"
+            "   - Geçici aksiyon/ulti efektleri (`PlayDashZoom`, `PlayUltimateCutscene` vb.) bitişte `pcall` + `task.delay` ile kamerayı `Enum.CameraType.Custom` ve normal FOV'a (`70`) geri döndürmelidir.\n"
+            "   - **ANCAK** kullanıcı buton/tuş ile **Yakınlaştır (Zoom) / Uzaklaştır / Nişan Al (Aim)** gibi kalıcı bir durum istediyse, `CameraFX.SetZoom(enabled, targetFov)` veya `CameraFX.ToggleZoom()` yaz ve bu durumda **ASLA otomatik olarak 70'e geri döndürme!** Kullanıcı tekrar kapatana kadar `FieldOfView` seçilen yakınlaştırılmış değerde sabit kalmalıdır.\n"
             "3) **EFEKT SERVİSLERİ:** `Lighting` altında kendi yönettiği `BlurEffect` ve `ColorCorrectionEffect` efektlerini yumuşak `TweenService` ile açıp kapat (asla kalıcı bulanıklık bırakma). `RunService`, `TweenService`, `Lighting` servislerini en üstte tanımla.\n"
             "4) **CAMERA_FX_MANIFEST (ZORUNLU):** Modülde dışa aktardığın HER fonksiyonun tam adını, parametresini ve hangi hareket/olayda çağrılacağını `manifest_updates.camera_fx` listesine yaz: `{\"fn\":\"PlayUltimateCutscene\",\"args\":[\"character\"],\"usage\":\"Ulti yeteneği açıldığında\"}`."
         ),
