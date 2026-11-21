@@ -1385,6 +1385,36 @@ async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_m
                 break
     return "".join(collected)
 
+def build_rig_type_hints(payload: dict) -> list[str]:
+    hints = []
+    seen = set()
+    candidates = []
+    sh = payload.get("scene_hierarchy") or {}
+    if isinstance(sh, dict):
+        candidates.extend(sh.get("Workspace") or [])
+    candidates.extend(payload.get("selected_items") or [])
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        rt = str(item.get("RigType") or "").strip().upper()
+        path = item.get("Path") or item.get("Name")
+        if rt in ("R6", "R15") and path and path not in seen:
+            seen.add(path)
+            if rt == "R6":
+                hints.append(
+                    f"[RIG TİPİ - {path}]: Bu rig R6'dır! SADECE şu eklemleri kullan: "
+                    "HumanoidRootPart, Torso, Head, Left Arm, Right Arm, Left Leg, Right Leg. "
+                    "ASLA UpperTorso, LowerTorso, LeftUpperLeg, RightUpperArm gibi R15 isimleri yazma!"
+                )
+            else:
+                hints.append(
+                    f"[RIG TİPİ - {path}]: Bu rig R15'tir! SADECE şu eklemleri kullan: "
+                    "HumanoidRootPart, LowerTorso, UpperTorso, Head, LeftUpperArm, LeftLowerArm, LeftHand, "
+                    "RightUpperArm, RightLowerArm, RightHand, LeftUpperLeg, LeftLowerLeg, LeftFoot, "
+                    "RightUpperLeg, RightLowerLeg, RightFoot."
+                )
+    return hints
+
 async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
     conn = get_db()
     cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
@@ -1398,6 +1428,9 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     thinking_mode = raw_tm if isinstance(raw_tm, bool) else str(raw_tm).strip().lower() in ("true", "1", "yes", "on")
     directives_cfg = payload.get("directives", {})
     active_directives = build_dynamic_directives(payload.get("prompt", ""), directives_cfg)
+    rig_type_hints = build_rig_type_hints(payload)
+    if rig_type_hints:
+        active_directives = rig_type_hints + active_directives
 
     mode_instruction = (
         "\n[DERİN DÜŞÜNME MODU AÇIK]: Karmaşık mimariyi, fizik/animasyon zamanlamalarını ve tüm kenar durumlarını adım adım planlayarak eksiksiz üret."
@@ -1423,6 +1456,10 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     user_json_str = json.dumps(enriched_payload, ensure_ascii=False)[:120000]
     is_syntax_repair = bool(payload.get("is_syntax_repair", False))
 
+    STAGE1_ALLOWED = {"create_instance", "edit_instance", "delete_instance", "insert_asset", "terrain_fill", "run_luau", "set_camera"}
+    STAGE2_ALLOWED = {"create_animation", "create_cutscene", "set_camera", "create_instance"}
+    STAGE3_ALLOWED = {"write_script", "edit_script", "delete_instance", "create_instance"}
+
     try:
         total_out_tokens = 0
         repaired_json = {}
@@ -1436,17 +1473,17 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             total_out_tokens += estimate_tokens(full_output)
             repaired_json = extract_and_repair_json(full_output)
         else:
-            # --- 1 INPUT -> 3 SIRALI OUTPUT (1: YAPILAR & RIGLER, 2: ANİMASYONLAR & KAMERA/BLUR, 3: SCRİPTLER/KODLAR) ---
+            # --- V5 HARD-GUARDRAIL: 1 INPUT -> 3 SIRALI OUTPUT + TOOL MASKING ---
             combined_actions = []
             combined_thoughts = []
             stage_summaries = []
 
             # AŞAMA 1/3: YAPILAR, SAHNE & RESMİ ROBLOX RİGLERİ
             stage1_sys = base_sys + (
-                "\n\n[AŞAMA 1/3 - SADECE YAPILAR, 3D SAHNE, IŞIK/POST-FX VE RESMİ RİGLER]:\n"
-                "- Bu aşamada SADECE 3D ortam, mimari, proplar, Terrain, Lighting efektleri (BlurEffect, DepthOfFieldEffect, BloomEffect, ColorCorrectionEffect, Atmosphere) ve RESMİ ROBLOX RİGLERİ üret.\n"
+                "\n\n[AŞAMA 1/3 - TOOL MASKING: SADECE YAPILAR, 3D SAHNE & RESMİ RİGLER]:\n"
+                "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `create_instance`, `edit_instance`, `delete_instance`, `insert_asset`, `terrain_fill`, `run_luau`, `set_camera`.\n"
+                "- YASAKLI ARAÇLAR (BU AŞAMADA KULLANILAMAZ / SİLİNİR): `write_script`, `edit_script`, `create_animation`, `create_cutscene`.\n"
                 "- İnsansı karakter/NPC/Boss için ASLA sıfırdan ham Part birleştirme! Mutlaka `run_luau` ile `Players:CreateHumanoidModelFromDescription(Instance.new('HumanoidDescription'), Enum.HumanoidRigType.R15)` (veya R6) kullan, SADECE `HumanoidRootPart.Anchored = true` yap, tüm diğer uzuvları `Anchored = false` bırak.\n"
-                "- Bu aşamada `write_script`, `edit_script`, `create_animation`, `create_cutscene` veya manuel `KeyframeSequence` ÜRETME (onlar Aşama 2 ve 3'te üretilecek).\n"
                 "- Eğer görevde yeni yapı/rig gerekmiyorsa `actions: []` döndür."
             )
             LIVE_STATE["status"] = f"{user['username']} | Aşama 1/3: Yapılar & Resmi Rigler..."
@@ -1484,7 +1521,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 break
 
             if not repaired_json.get("need_files"):
-                s1_actions = [a for a in (s1_json.get("actions") or []) if a.get("type") != "fallback_code"]
+                s1_actions = [a for a in (s1_json.get("actions") or []) if a.get("type") in STAGE1_ALLOWED]
                 combined_actions.extend(s1_actions)
                 if s1_json.get("thought"):
                     combined_thoughts.append("[1/3 Yapılar] " + str(s1_json.get("thought")))
@@ -1498,14 +1535,14 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 })
 
                 # AŞAMA 2/3: ANİMASYONLAR & SİNEMATİK KAMERA (FOV, POV, BLUR/DOF)
+                rig_hint_block = ("\n" + "\n".join(rig_type_hints)) if rig_type_hints else ""
                 stage2_sys = base_sys + (
-                    "\n\n[AŞAMA 2/3 - SADECE ANİMASYONLAR, SİNEMATİK KAMERA (FOV/POV) VE BLUR/POST-FX]:\n"
-                    "- Aşama 1/3'te oluşturulan yapılar ve resmi rigler sahnede hazır.\n"
-                    "- Bu aşamada SADECE:\n"
-                    "  1) `create_animation` aksiyonları üret (doğru `rig_path` ile, örn. `Workspace.RigAdi`, zengin kronolojik R15/R6 `keyframes` ve `poses` ile — ASLA `run_luau` içinde elle `KeyframeSequence` yazma!).\n"
-                    "  2) Sinematik kamera / sahne çekimi gerekiyorsa `create_cutscene` ve `set_camera` üret: çoklu POV açıları (geniş, omuz üstü, alt açı, yakın plan), belirgin FOV değişimleri (örn. 75 -> 38 -> 85), kamera sarsıntısı (`shake`) ve `cinematic_bars` ekle.\n"
-                    "  3) `Lighting` altında eksikse `BlurEffect`, `DepthOfFieldEffect`, `BloomEffect`, `ColorCorrectionEffect` oluştur (`create_instance`).\n"
-                    "- Bu aşamada 3D yapı/rigleri tekrar üretme ve `write_script`/`edit_script` yazma (scriptler Aşama 3/3'te yazılacak)."
+                    "\n\n[AŞAMA 2/3 - TOOL MASKING: SADECE ANİMASYONLAR, SİNEMATİK KAMERA (FOV/POV) VE BLUR/POST-FX]:\n"
+                    "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `create_animation`, `create_cutscene`, `set_camera`, (ve sadece `Lighting` altı Post-FX için `create_instance`: BlurEffect, DepthOfFieldEffect, BloomEffect, ColorCorrectionEffect).\n"
+                    "- YASAKLI ARAÇLAR (BU AŞAMADA KULLANILAMAZ / SİLİNİR): `write_script`, `edit_script`, `run_luau`.\n"
+                    "- `create_animation` aksiyonlarını doğru `rig_path` (örn. `Workspace.RigAdi`) ve rig tipine (R6 vs R15) tam uyumlu eklem isimleriyle üret.\n"
+                    "- Sinematik kamera gerekiyorsa `create_cutscene` ile çoklu POV açıları, belirgin FOV değişimleri (75 -> 38 -> 85) ve `shake` ekle."
+                    + rig_hint_block
                 )
                 LIVE_STATE["status"] = f"{user['username']} | Aşama 2/3: Animasyonlar & Kamera/Blur..."
                 s2_payload = {
@@ -1522,13 +1559,26 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 s2_out = await stream_venice_call(cfg, s2_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 2/3: Animasyonlar & Kamera/FOV/Blur]")
                 total_out_tokens += estimate_tokens(s2_out)
                 s2_json = extract_and_repair_json(s2_out)
-                s2_actions = [a for a in (s2_json.get("actions") or []) if a.get("type") != "fallback_code"]
+                s2_actions = []
+                for a in (s2_json.get("actions") or []):
+                    t = a.get("type")
+                    if t not in STAGE2_ALLOWED:
+                        continue
+                    if t == "create_instance" and str(a.get("parent") or "") != "Lighting":
+                        continue
+                    s2_actions.append(a)
                 combined_actions.extend(s2_actions)
                 if s2_json.get("thought"):
                     combined_thoughts.append("[2/3 Animasyon & Kamera] " + str(s2_json.get("thought")))
+
+                created_anims = [
+                    {"name": a.get("name"), "rig_path": a.get("rig_path"), "loop": a.get("loop", False)}
+                    for a in s2_actions if a.get("type") == "create_animation"
+                ]
                 stage_summaries.append({
                     "stage": "2_animations_and_camera",
                     "thought": s2_json.get("thought", ""),
+                    "created_animations_in_ReplicatedStorage_AI_Animations": created_anims,
                     "actions_summary": [
                         {"type": a.get("type"), "name": a.get("name"), "rig_path": a.get("rig_path"), "path": a.get("path")}
                         for a in s2_actions
@@ -1536,15 +1586,22 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 })
 
                 # AŞAMA 3/3: SCRİPTLER & ÇALIŞMA ZAMANI KODLARI
+                anim_inject_line = ""
+                if created_anims:
+                    anim_names = ", ".join([f"ReplicatedStorage.AI_Animations.{a['name']} (rig: {a.get('rig_path') or 'Workspace'})" for a in created_anims if a.get("name")])
+                    anim_inject_line = (
+                        f"\n- ZORUNLU AŞAMA 2 ANİMASYON LİSTESİ: Aşama 2'de şu animasyonlar üretildi: [{anim_names}]. "
+                        "Bunları mutlaka `KeyframeSequenceProvider:RegisterKeyframeSequence(keyframeSeq)` -> `Animation.AnimationId = hashId` -> `animator:LoadAnimation(anim):Play()` köprüsüyle oynat!"
+                    )
                 stage3_sys = base_sys + (
-                    "\n\n[AŞAMA 3/3 - SADECE SCRİPTLER VE ÇALIŞMA ZAMANI LUAU KODLARI]:\n"
-                    "- Aşama 1/3 (Yapılar & Resmi Rigler) ve Aşama 2/3 (Animasyonlar, Cutscene & Blur/Post-FX) sahnede hazır.\n"
-                    "- Bu aşamada SADECE `write_script` ve `edit_script` (gerekirse `RemoteEvent` için `create_instance`) üret.\n"
+                    "\n\n[AŞAMA 3/3 - TOOL MASKING: SADECE SCRİPTLER VE ÇALIŞMA ZAMANI LUAU KODLARI]:\n"
+                    "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `write_script`, `edit_script`, `delete_instance`, (ve sadece `RemoteEvent`/`RemoteFunction` için `create_instance`).\n"
+                    "- YASAKLI ARAÇLAR (BU AŞAMADA KULLANILAMAZ / SİLİNİR): `create_animation`, `create_cutscene`, `run_luau`.\n"
                     "- `LocalScript`leri her zaman `StarterPlayer.StarterPlayerScripts` içine koy.\n"
-                    "- `create_animation` ile üretilen `KeyframeSequence`ler `ReplicatedStorage.AI_Animations` altındadır. Bunları oynatırken MUTLAKA `local hashId = game:GetService('KeyframeSequenceProvider'):RegisterKeyframeSequence(keyframeSeq); local anim = Instance.new('Animation'); anim.AnimationId = hashId; animator:LoadAnimation(anim):Play()` köprüsünü kullan.\n"
                     "- Animasyon `Workspace` içindeki bir NPC üzerinde oynayacaksa `LocalScript` yerine MUTLAKA `ServerScriptService` içinde Sunucu `Script`i ile oynat.\n"
-                    "- Eğer Aşama 2/3'te `create_cutscene` kullanılmadıysa ve kamera/aksiyon gerekiyorsa, dinamik FOV/POV geçişleri ve `Lighting.BlurEffect` / `DepthOfFieldEffect` animasyonları yapan temiz bir kamera `LocalScript`i yaz (eğer `create_cutscene` zaten kullanıldıysa kamera `LocalScript`i yazma, sadece FOV/Blur/etkileşim/oyun mantığı scriptlerini yaz).\n"
-                    "- Aşama 1/3 yapılarını veya Aşama 2/3 animasyonlarını tekrar üretme ya da silme."
+                    "- Eğer Aşama 2/3'te `create_cutscene` kullanılmadıysa ve kamera/aksiyon gerekiyorsa, dinamik FOV/POV geçişleri ve `Lighting.BlurEffect` / `DepthOfFieldEffect` animasyonları yapan temiz bir kamera `LocalScript`i yaz."
+                    + anim_inject_line
+                    + rig_hint_block
                 )
                 LIVE_STATE["status"] = f"{user['username']} | Aşama 3/3: Scriptler & Kodlar..."
                 s3_payload = {
@@ -1564,7 +1621,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 s3_out = await stream_venice_call(cfg, s3_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 3/3: Scriptler & Kodlar]")
                 total_out_tokens += estimate_tokens(s3_out)
                 s3_json = extract_and_repair_json(s3_out)
-                s3_actions = [a for a in (s3_json.get("actions") or []) if a.get("type") != "fallback_code"]
+                s3_actions = [a for a in (s3_json.get("actions") or []) if a.get("type") in STAGE3_ALLOWED]
                 combined_actions.extend(s3_actions)
                 if s3_json.get("thought"):
                     combined_thoughts.append("[3/3 Kodlar] " + str(s3_json.get("thought")))
