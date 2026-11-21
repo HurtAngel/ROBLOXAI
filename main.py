@@ -303,10 +303,13 @@ def build_dynamic_directives(prompt_text: str, directives_cfg: dict) -> list[str
         )
     if req_anim:
         rules.append(
-            "[ZORUNLU KARAKTER ANİMASYONU]: Karakter asla kütük gibi sabit kalmamalıdır! "
+            "[ZORUNLU KARAKTER ANİMASYONU - 3 KATI KURAL]: Karakter asla kütük gibi sabit kalmamalıdır! "
             "Hem Studio Animation Editor için `create_animation` ile tam R15/R6 keyframe animasyonu üret (doğru `rig_path` ile), "
-            "hem de çalışma zamanında Motor6D eklemlerini (RightShoulder, LeftShoulder, Waist/Torso, Neck, RightHip, LeftHip) "
-            "akıcı şekilde hareket ettir."
+            "hem de çalışma zamanı animasyonlarında şu 3 katı kurala KESİNLİKLE uy:\n"
+            "1) TOOL KULLANMA YASAĞI: Silahı/ekipmanı ASLA `Instance.new('Tool')` ile yapma (klasik kol kaldırma animasyonunu tetikler ve Grip açısını bozar). "
+            "Silahı doğrudan `Model` olarak yaratıp `Motor6D` ile `RightHand` (R15) veya `Right Arm` (R6) içine bağla.\n"
+            "2) ANIMATE SCRİPTİNİ GEÇİCİ SUSTURMA: Özel yetenek/saldırı animasyonu oynarken karakterin `Animate` scriptini geçici olarak devre dışı bırak (`Animate.Disabled = true`), poz/vuruş bitince tekrar aç (`Animate.Disabled = false`); yoksa varsayılan koşu/bekleme animasyonu Motor6D açılarını ezer.\n"
+            "3) DOĞRUDAN Motor6D.Transform KULLANIMI: `Motor6D.C0` tweenlemek yerine, `RunService.Stepped` içinde ilgili eklemlerin (RightShoulder, LeftShoulder, Waist/Torso, Neck, RightHip, LeftHip) `Motor6D.Transform` CFrame'ini doğrudan ez (overwrite et) — animasyon motorunun üstüne garantili yazmanın tek yolu budur."
         )
     if req_cam:
         rules.append(
