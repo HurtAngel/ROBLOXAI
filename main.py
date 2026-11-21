@@ -1930,21 +1930,36 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 project_notes = {**project_notes, **brief_json["project_notes"]}
                 forbid_npc = V7.user_forbids_npc(prompt_text, project_notes)
             layer_briefs = brief_json.get("layer_briefs") if isinstance(brief_json.get("layer_briefs"), dict) else {}
+            is_incremental_edit = bool(brief_json.get("is_incremental_edit", False))
+            raw_active_layers = brief_json.get("active_layers")
+            if isinstance(raw_active_layers, list) and len(raw_active_layers) > 0:
+                active_layers_set = {str(x).strip() for x in raw_active_layers if str(x).strip() in V7.SUB_AGENT_IDS}
+                if not active_layers_set:
+                    active_layers_set = set(V7.SUB_AGENT_IDS)
+            else:
+                active_layers_set = set(V7.SUB_AGENT_IDS)
 
             pipe_by_id["main_agent"]["status"] = "done"
             for aid in V7.SUB_AGENT_IDS:
-                pipe_by_id[aid]["status"] = "active"
+                if aid in active_layers_set:
+                    pipe_by_id[aid]["status"] = "active"
+                else:
+                    pipe_by_id[aid]["status"] = "pass"
+                    pipe_by_id[aid]["reason"] = "Mevcut yapı korundu (Artırımlı Düzenleme)"
             if brief_json.get("thought"):
                 combined_thoughts.append("[Main Agent] " + str(brief_json["thought"]))
-            handoffs.append("Main Agent → 3 Bütünleşik Katman planı hazırlandı" + (" (NPC YASAKLI)" if forbid_npc else ""))
-            sync_live("Katman 1 (Dünya & Animasyon) başlatılıyor...")
+            mode_tag = "Artırımlı Düzenleme" if is_incremental_edit else "Tam Kurulum"
+            handoffs.append(f"Main Agent ({mode_tag}) → Aktif Katmanlar: {', '.join([a['short_name'] for a in V7.SUB_AGENTS if a['id'] in active_layers_set])}" + (" (NPC YASAKLI)" if forbid_npc else ""))
+            sync_live("Aktif katmanlar başlatılıyor...")
 
             # =========================================================
-            # KATMAN 1 → KATMAN 2 → KATMAN 3 (SIFIR KOPUKLUK BORU HATTI)
+            # KATMAN 1 → KATMAN 2 → KATMAN 3 (SIFIR KOPUKLUK + ARTIRIMLI MOD)
             # =========================================================
             need_files_result = None
             for meta in V7.SUB_AGENTS:
                 aid = meta["id"]
+                if aid not in active_layers_set:
+                    continue
                 a_cfg = agents_cfg[aid]
                 a_model = a_cfg["model"]
                 allowed_set = set(meta["allowed_actions"])
@@ -1956,6 +1971,12 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 LIVE_STATE["status"] = f"{user['username']} | {meta['title']} ({a_model})..."
 
                 extra_notes: list[str] = []
+                if is_incremental_edit:
+                    extra_notes.append(
+                        "ARTIRIMLI DÜZENLEME MODU (SIFIRDAN SİLME YASAĞI): Sahnede zaten kurulmuş bir harita/oyun var! "
+                        "Mevcut haritayı, çalışan sistemleri veya diğer objeleri ASLA sıfırdan yeniden inşa etme; "
+                        "yalnızca kullanıcının istediği spesifik değişikliği (edit_instance / edit_script / write_script upsert) uygula."
+                    )
                 if cfg.get("system_prompt") and not V6.is_legacy_prompt(cfg["system_prompt"]):
                     extra_notes.append("ADMIN EK KURALI: " + cfg["system_prompt"][:1500])
                 if rig_type_hints:
@@ -1967,7 +1988,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     anim_names = [x.get("name") if isinstance(x, dict) else str(x) for x in world_manifest.get("animations", [])]
                     if anim_names:
                         extra_notes.append("WORLD_MANIFEST ANİMASYONLARI (birebir aynı isimle AIKit.PlayAnim kullan): " + ", ".join(anim_names))
-                    extra_notes.append("TÜM istemci arayüzü (StartMenuGui, GameHUD, PlayerGuideUI), tuşlar ve kamera-güvenli FOV TEK BİR `StarterPlayer.StarterPlayerScripts.ClientGameCore` LocalScript'i içinde olmalıdır.")
+                    extra_notes.append("TÜM istemci arayüzü (StartMenuGui, GameHUD, PlayerGuideUI), tuşlar ve kamera-güvenli FOV TEK BİR `StarterPlayer.StarterPlayerScripts.ClientGameCore` LocalScript'i içinde olmalıdır. Başlangıçta PlayerGui'deki eski kopyaları Destroy() ile temizle.")
                 elif aid == "layer_server_core":
                     rem_names = [x.get("name") if isinstance(x, dict) else str(x) for x in client_manifest.get("remotes", [])]
                     if rem_names:
@@ -2104,7 +2125,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             else:
                 # AIKit ve Varsayılan Sinematik Atmosfer güvenceleri
                 p_low = (prompt_text + " " + json.dumps(project_notes, ensure_ascii=False)).lower()
-                is_scene_build = len(combined_actions) > 0
+                is_scene_build = (not is_incremental_edit) and ("layer_world_builder" in active_layers_set) and len(combined_actions) > 0
                 uses_kit = any("AIKit" in str(a.get("source", "")) for a in combined_actions)
                 has_kit_action = any(a.get("type") in ("spawn_rig", "create_animation", "setup_camera", "install_kit") for a in combined_actions)
                 if (uses_kit or is_scene_build) and not has_kit_action:

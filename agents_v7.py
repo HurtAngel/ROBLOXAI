@@ -88,10 +88,12 @@ AGENT_REGISTRY: list[dict] = [
             "- Kullanıcı soruları cevapladığında cevapları `project_notes` içine işle; kritik belirsizlik kalmadıysa `\"status\": \"ready\"` döndür.\n"
             "- SADECE geçerli JSON döndür:\n"
             "{\"status\":\"needs_clarification|ready\",\"summary\":\"...\",\"assistant_message\":\"...\",\"questions\":[\"1. ...\",\"2. ...\",\"3. ...\"],\"project_notes\":{\"game_title\":\"...\",\"core_concept\":\"...\",\"confirmed_features\":[],\"negative_constraints\":[],\"camera_preference\":\"...\",\"atmosphere_theme\":\"...\",\"controls_and_mechanics\":[],\"win_lose_conditions\":\"...\",\"ui_requirements\":[]}}\n\n"
-            "2) `MODE == \"BRIEF\"` (3 Bütünleşik Katman İçin Ortak Görev Emri):\n"
-            "- `PROJECT_NOTES` belgesine bakarak 3 bütünleşik katmanın (`layer_world_builder`, `layer_client_core`, `layer_server_core`) sıfır kopuklukla çalışması için kısa, somut görev emirleri (`layer_briefs`) yaz.\n"
+            "2) `MODE == \"BRIEF\"` (3 Bütünleşik Katman İçin Ortak Görev Emri & Artırımlı Düzenleme):\n"
+            "- Önce `SCENE_HIERARCHY` ve `KULLANICI_KOMUTU` alanlarına bak:\n"
+            "  * **Sıfırdan yeni oyun/sahne kuruluyorsa:** `\"is_incremental_edit\": false`, `\"active_layers\": [\"layer_world_builder\", \"layer_client_core\", \"layer_server_core\"]` döndür.\n"
+            "  * **Sahnede zaten çalışan bir oyun/harita varken kullanıcı küçük/artırımlı bir düzenleme istiyorsa** (ör. 'stamina hızını artır', 'NPC canını 150 yap', 'yağmuru azalt', 'buton rengini değiştir'): `\"is_incremental_edit\": true` yap ve `\"active_layers\"` içine **YALNIZCA değişikliği ilgilendiren katman(lar)ı** koy! Mevcut haritayı/sistemleri asla sıfırdan sildirme.\n"
             "- SADECE geçerli JSON döndür:\n"
-            "{\"thought\":\"...\",\"project_notes\":{...},\"layer_briefs\":{\"layer_world_builder\":\"...\",\"layer_client_core\":\"...\",\"layer_server_core\":\"...\"}}"
+            "{\"thought\":\"...\",\"is_incremental_edit\":false,\"active_layers\":[\"layer_world_builder\",\"layer_client_core\",\"layer_server_core\"],\"project_notes\":{...},\"layer_briefs\":{\"layer_world_builder\":\"...\",\"layer_client_core\":\"...\",\"layer_server_core\":\"...\"}}"
         ),
     },
     {
@@ -130,7 +132,8 @@ AGENT_REGISTRY: list[dict] = [
         "default_prompt": (
             "Sen Tek Parça İstemci Beyni Mimarısın (`layer_client_core`).\n"
             "GÖREV KAPSAMIN: Parçalı scriptler yerine TÜM istemci deneyimini **TEK BİR bütünleşik `LocalScript` (`StarterPlayer.StarterPlayerScripts.ClientGameCore`)** içinde üret (gerekli `RemoteEvent`'leri `ReplicatedStorage` altında `create_instance` ile oluştur). Böylece arayüzler, tuşlar, animasyonlar ve kamera asla birbirinden kopmaz!\n"
-            "TEK PARÇA `ClientGameCore` İÇİNDE ZORUNLU 5 BİLEŞEN:\n"
+            "TEK PARÇA `ClientGameCore` İÇİNDE ZORUNLU KURALLAR & 5 BİLEŞEN:\n"
+            "0) **İSTEMCİ UI TEKİLLİK KURALI (ZORUNLU):** `ClientGameCore` çalışmaya başladığı anda `PlayerGui` içinde daha önceden kalmış `StartMenuGui`, `GameHUD`, `PlayerGuideUI` veya adında `Stamina` / `HUD` / `Menu` / `Guide` geçen tüm eski `ScreenGui` kopyalarını mutlaka `Destroy()` ile temizle, ardından YALNIZCA tek bir güncel arayüz seti oluştur! Ekranda asla 2 tane Stamina Bar veya çift HUD birikmemeli.\n"
             "1) **Başlangıç / Ana Menü (`StartMenuGui`):** `PlayerGui` içinde kodla oluştur. Oyun açıldığında şık, modern, yarı saydam kartlı bir ana menü (Oyun Başlığı, kısa açıklama ve belirgin **'OYNA'** butonu) ekranda görünür. **'OYNA'** butonuna basıldığında `StartMenuGui.Enabled = false` olur, `GameHUD.Enabled = true` olur ve sunucuya başlama sinyali (gerekirse) gider.\n"
             "2) **Oyun İçi HUD & Skor Tabelası (`GameHUD`):** `Scale` uyumlu, okunaklı skor/süre tabelası, güç/stamina barları ve oyun sonu (**'Tekrar Oyna'** butonlu) sonuç ekranı (`EndGameFrame`).\n"
             "3) **Etkileşimli Oyuncu Rehberi (`PlayerGuideUI`):** Ekranın kenarında `[H] Rehber` butonu ve `H` tuşuyla açılıp kapanabilen, oyundaki **tüm aktif tuşları ve ne işe yaradıklarını** (ör. `[E] Sert Şut`, `[Q] Falso`, `[Shift] Sprint`) net biçimde listeleyen ve ilk girişte oyuncuya ne yapacağını gösteren canlı rehber paneli.\n"
