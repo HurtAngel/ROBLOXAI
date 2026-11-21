@@ -386,7 +386,32 @@ end
 promptBox:GetPropertyChangedSignal("Text"):Connect(updatePromptScrollSize)
 promptScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePromptScrollSize)
 
--- 5. ANA ÇALIŞTIR + İKİLİ KURTARMA ÇUBUĞU + UZUN KOMUT EDİTÖRÜ
+-- 5. PROMPT ZENGİNLEŞTİRİCİ ANAHTARI + ANA ÇALIŞTIR + İKİLİ KURTARMA ÇUBUĞU
+local expandPromptEnabled = false
+local expandToggleBtn = Instance.new("TextButton")
+expandToggleBtn.LayoutOrder = 12
+expandToggleBtn.Size = UDim2.new(1, 0, 0, 30)
+expandToggleBtn.BackgroundColor3 = C.CARD
+expandToggleBtn.Text = "✨ Prompt Zenginleştirici: KAPALI"
+expandToggleBtn.TextColor3 = C.MUTED
+expandToggleBtn.Font = Enum.Font.GothamBold
+expandToggleBtn.TextSize = 11
+expandToggleBtn.Parent = root
+styleBox(expandToggleBtn)
+
+expandToggleBtn.MouseButton1Click:Connect(function()
+	expandPromptEnabled = not expandPromptEnabled
+	if expandPromptEnabled then
+		expandToggleBtn.Text = "✨ Prompt Zenginleştirici: AÇIK (4 Başlıklı Detaylı Plan)"
+		expandToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 78, 56)
+		expandToggleBtn.TextColor3 = Color3.fromRGB(205, 255, 225)
+	else
+		expandToggleBtn.Text = "✨ Prompt Zenginleştirici: KAPALI"
+		expandToggleBtn.BackgroundColor3 = C.CARD
+		expandToggleBtn.TextColor3 = C.MUTED
+	end
+end)
+
 local runBtn = Instance.new("TextButton")
 runBtn.LayoutOrder = 13
 runBtn.Size = UDim2.new(1, 0, 0, 38)
@@ -1237,7 +1262,7 @@ function AIKit.StartClient()
 		local sprintFov = tonumber(script:GetAttribute("CamSprintFov")) or (baseFov + 12)
 		local dist = tonumber(script:GetAttribute("CamDistance")) or 10
 		local height = tonumber(script:GetAttribute("CamHeight")) or 2
-		local shoulder = tonumber(script:GetAttribute("CamShoulder")) or 2
+		local shoulder = tonumber(script:GetAttribute("CamShoulder")) or 0
 
 		if hum and script:GetAttribute("SprintEnabled") then
 			local walkSpeed = tonumber(script:GetAttribute("WalkSpeed")) or 16
@@ -1707,7 +1732,7 @@ end
 
 -- setup_camera: test edilmiş kamera sistemini yapılandırır (third_person, follow, first_person, top_down, isometric, side_scroller, broadcast)
 local CAMERA_DEFAULTS = {
-	third_person = {distance = 11, height = 2, shoulder = 2.2, fov = 70, sprint_fov = 84},
+	third_person = {distance = 11, height = 2, shoulder = 0, fov = 70, sprint_fov = 84},
 	follow = {distance = 14, height = 2, shoulder = 0, fov = 70, sprint_fov = 82},
 	first_person = {distance = 0.5, height = 0, shoulder = 0, fov = 80, sprint_fov = 90},
 	top_down = {distance = 45, height = 0, shoulder = 0, fov = 50, sprint_fov = 55},
@@ -2113,7 +2138,7 @@ local function executeActions(actions)
 	return table.concat(logs, "\n")
 end
 
-local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetries)
+local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetries, skipExpand)
 	stepCount = stepCount or 1
 	syntaxRetries = syntaxRetries or 0
 	if stepCount > 6 then
@@ -2121,6 +2146,31 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 		runBtn.Text = "▶ Çalıştır"
 		runBtn.BackgroundColor3 = C.ACCENT
 		return
+	end
+
+	if expandPromptEnabled and stepCount == 1 and syntaxRetries == 0 and not skipExpand then
+		runBtn.Text = "✨ Zenginleştiriliyor..."
+		logBox.Text = "✨ Prompt Zenginleştirici çalışıyor (4 başlıklı teknik oyun tasarımı üretiliyor)..."
+		local expOk, expRes = pcall(function()
+			return HttpService:RequestAsync({
+				Url = DEFAULT_URL .. "/expand-prompt",
+				Method = "POST",
+				Headers = getHeaders(true),
+				Body = HttpService:JSONEncode({ prompt = customPrompt })
+			})
+		end)
+		if expOk and expRes and expRes.Success then
+			local decOk, expData = pcall(function() return HttpService:JSONDecode(expRes.Body) end)
+			if decOk and type(expData) == "table" and expData.expanded_prompt and expData.expanded_prompt ~= "" then
+				customPrompt = expData.expanded_prompt
+				logBox.Text = string.format("✨ Zenginleştirilmiş Tasarım (%s):\n\n%s\n\n⏳ Ana üretim hattı (Aşama 0-1-2-3) başlatılıyor...", tostring(expData.model or "expander"), customPrompt)
+			else
+				logBox.Text = "⚠️ Zenginleştirici yanıtı çözümlenemedi, orijinal prompt ile devam ediliyor..."
+			end
+		else
+			logBox.Text = "⚠️ Prompt Zenginleştirici ulaşılamadı, orijinal prompt ile devam ediliyor..."
+		end
+		runBtn.Text = "Üretiliyor..."
 	end
 
 	local body = HttpService:JSONEncode({
@@ -2401,7 +2451,7 @@ fixErrBtn.MouseButton1Click:Connect(function()
 	fixErrBtn.TextColor3 = C.MUTED
 	runBtn.Text = "Hatalar Onarılıyor..."
 	runBtn.BackgroundColor3 = C.CARD
-	runAgentWorkflow(errText, {}, 1, 0)
+	runAgentWorkflow(errText, {}, 1, 0, true)
 end)
 
 task.spawn(verifyAccount)
