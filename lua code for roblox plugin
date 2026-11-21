@@ -613,23 +613,119 @@ runLongBtn.TextSize = 10
 runLongBtn.Parent = longRow
 styleBox(runLongBtn)
 
--- 6. CANLI AKIŞ & 13 ALT AGENT BORU HATTI RAPORU
-makeLabel("CANLI AKIŞ & 13 ALT AGENT İŞLEM RAPORU", 19)
+-- 6. 15 AGENT CANLI DURUM AKIŞI IZGARASI (1 MAIN + 14 ALT AGENT) + DETAYLI RAPOR
+makeLabel("15 AGENT CANLI DURUM AKIŞI (1 MAIN + 14 ALT AGENT)", 19)
+
+local AGENT_15_LIST = {
+	{ id = "main_agent", label = "0. Main Agent" },
+	{ id = "agent_architecture", label = "1. Mimari" },
+	{ id = "agent_environment", label = "2. Çevre" },
+	{ id = "agent_graphics", label = "3. Grafik" },
+	{ id = "agent_vfx", label = "4. VFX" },
+	{ id = "agent_animation", label = "5. Animasyon" },
+	{ id = "agent_ui_menus", label = "6. UI & Menü" },
+	{ id = "agent_player_guide", label = "7. Rehber" },
+	{ id = "agent_movement", label = "8. Hareket" },
+	{ id = "agent_camera", label = "9. Kamera" },
+	{ id = "agent_combat_skills", label = "10. Savaş/Ytnk" },
+	{ id = "agent_interaction", label = "11. Etkileşim" },
+	{ id = "agent_ai_npc", label = "12. AI & NPC" },
+	{ id = "agent_inventory", label = "13. Envanter" },
+	{ id = "agent_economy", label = "14. Ekonomi" },
+}
+
+local agentGridFrame = Instance.new("Frame")
+agentGridFrame.LayoutOrder = 20
+agentGridFrame.Size = UDim2.new(1, 0, 0, 232)
+agentGridFrame.BackgroundTransparency = 1
+agentGridFrame.Parent = root
+
+local agentGridLayout = Instance.new("UIGridLayout")
+agentGridLayout.CellSize = UDim2.new(0.49, 0, 0, 24)
+agentGridLayout.CellPadding = UDim2.new(0.02, 0, 0, 4)
+agentGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+agentGridLayout.Parent = agentGridFrame
+
+local agentGridCards = {}
+for idx, item in ipairs(AGENT_15_LIST) do
+	local card = Instance.new("TextLabel")
+	card.LayoutOrder = idx
+	card.BackgroundColor3 = C.CARD
+	card.Text = "· " .. item.label
+	card.TextColor3 = C.MUTED
+	card.Font = Enum.Font.GothamMedium
+	card.TextSize = 10
+	card.TextXAlignment = Enum.TextXAlignment.Left
+	card.TextTruncate = Enum.TextTruncate.AtEnd
+	card.Parent = agentGridFrame
+	styleBox(card, 5)
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 6)
+	pad.PaddingRight = UDim.new(0, 4)
+	pad.Parent = card
+	agentGridCards[item.id] = { card = card, label = item.label }
+end
+
+local function resetAgentGrid()
+	for _, info in pairs(agentGridCards) do
+		info.card.BackgroundColor3 = C.CARD
+		info.card.TextColor3 = C.MUTED
+		info.card.Text = "· " .. info.label
+	end
+end
+
+local function updateAgentGrid(pipeline)
+	if type(pipeline) ~= "table" then return end
+	for _, p in ipairs(pipeline) do
+		local info = agentGridCards[p.id]
+		if info then
+			local st = tostring(p.status or "pending")
+			if st == "running" then
+				info.card.BackgroundColor3 = Color3.fromRGB(28, 62, 118)
+				info.card.TextColor3 = Color3.fromRGB(219, 234, 254)
+				info.card.Text = "🔄 " .. info.label
+			elseif st == "done" then
+				info.card.BackgroundColor3 = Color3.fromRGB(20, 74, 52)
+				info.card.TextColor3 = Color3.fromRGB(167, 243, 208)
+				local cnt = tonumber(p.actions_count) or 0
+				info.card.Text = cnt > 0 and string.format("✅ %s (%d)", info.label, cnt) or ("✅ " .. info.label)
+			elseif st == "active" then
+				info.card.BackgroundColor3 = Color3.fromRGB(68, 55, 22)
+				info.card.TextColor3 = Color3.fromRGB(253, 230, 138)
+				info.card.Text = "⏳ " .. info.label .. " [AKTİF]"
+			elseif st == "pass" then
+				info.card.BackgroundColor3 = Color3.fromRGB(24, 24, 29)
+				info.card.TextColor3 = Color3.fromRGB(113, 113, 122)
+				info.card.Text = "⏭️ " .. info.label .. " [PASS]"
+			elseif st == "error" then
+				info.card.BackgroundColor3 = Color3.fromRGB(102, 26, 34)
+				info.card.TextColor3 = Color3.fromRGB(254, 202, 202)
+				info.card.Text = "❌ " .. info.label
+			else
+				info.card.BackgroundColor3 = C.CARD
+				info.card.TextColor3 = C.MUTED
+				info.card.Text = "· " .. info.label
+			end
+		end
+	end
+end
+
+makeLabel("CANLI AKIŞ & İŞLEM RAPORU", 21)
 
 local logScroll = Instance.new("ScrollingFrame")
-logScroll.LayoutOrder = 20
-logScroll.Size = UDim2.new(1, 0, 0, 360)
+logScroll.LayoutOrder = 22
+logScroll.Size = UDim2.new(1, 0, 0, 340)
 logScroll.BackgroundColor3 = C.INPUT
 logScroll.BorderSizePixel = 0
 logScroll.ScrollBarThickness = 6
-logScroll.CanvasSize = UDim2.new(0, 0, 0, 360)
+logScroll.CanvasSize = UDim2.new(0, 0, 0, 340)
 logScroll.Parent = root
 styleBox(logScroll)
 
 local logBox = Instance.new("TextBox")
-logBox.Size = UDim2.new(1, -10, 0, 360)
+logBox.Size = UDim2.new(1, -10, 0, 340)
 logBox.BackgroundTransparency = 1
-logBox.Text = "Hazır. (V7: 1 Main Agent + 13 Uzman Alt Agent)"
+logBox.Text = "Hazır. (V7.5: 1 Main Agent + 14 Uzman Alt Agent = 15 Agent)"
 logBox.TextColor3 = Color3.fromRGB(167, 243, 208)
 logBox.Font = Enum.Font.Code
 logBox.TextSize = 11
@@ -2321,7 +2417,7 @@ local function setIdleButtons()
 	else
 		runBtn.Text = "▶ Hemen Üret"
 		runBtn.BackgroundColor3 = C.ACCENT
-		promptBox.PlaceholderText = "Ne yapmak istiyorsunuz? (Doğrudan 14-Agent üretim hattı başlar)"
+		promptBox.PlaceholderText = "Ne yapmak istiyorsunuz? (Doğrudan 15-Agent üretim hattı başlar)"
 	end
 end
 
@@ -2406,7 +2502,7 @@ local function formatAgentPipelineSummary(pipeline, handoffs)
 		pending = "· BEKLİYOR",
 		error = "❌ HATA",
 	}
-	local lines = { "=== 14-AGENT BORU HATTI ÖZETİ ===" }
+	local lines = { "=== 15-AGENT BORU HATTI ÖZETİ ===" }
 	for _, p in ipairs(pipeline) do
 		local st = iconMap[p.status] or tostring(p.status)
 		local extra = ""
@@ -2454,7 +2550,7 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 			local decOk, expData = pcall(function() return HttpService:JSONDecode(expRes.Body) end)
 			if decOk and type(expData) == "table" and expData.expanded_prompt and expData.expanded_prompt ~= "" then
 				customPrompt = expData.expanded_prompt
-				logBox.Text = string.format("✨ Zenginleştirilmiş Tasarım (%s):\n\n%s\n\n⏳ 14-Agent üretim hattı başlatılıyor...", tostring(expData.model or "expander"), customPrompt)
+				logBox.Text = string.format("✨ Zenginleştirilmiş Tasarım (%s):\n\n%s\n\n⏳ 15-Agent üretim hattı başlatılıyor...", tostring(expData.model or "expander"), customPrompt)
 			else
 				logBox.Text = "⚠️ Zenginleştirici yanıtı çözümlenemedi, orijinal prompt ile devam ediliyor..."
 			end
@@ -2508,6 +2604,7 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 
 	local taskId = startData.task_id
 	local polling = true
+	resetAgentGrid()
 
 	task.spawn(function()
 		while polling do
@@ -2522,11 +2619,13 @@ local function runAgentWorkflow(customPrompt, extraFiles, stepCount, syntaxRetri
 
 			if pOk and pRes.Success then
 				local pData = HttpService:JSONDecode(pRes.Body)
+				if pData.agent_pipeline then updateAgentGrid(pData.agent_pipeline) end
 				logBox.Text = string.format("Adım %d | Durum: %s\n\n%s", stepCount, tostring(pData.status), tostring(pData.buffer or ""))
 
 				if pData.status == "completed" then
 					polling = false
 					local result = pData.result or {}
+					updateAgentGrid(result.agent_pipeline or pData.agent_pipeline)
 					local needFiles = result.need_files or {}
 
 					if #needFiles > 0 then
@@ -2604,7 +2703,7 @@ local function runDiscoveryStep(inputText)
 	end)
 
 	if not ok or not res or not res.Success then
-		logBox.Text = "⚠️ Keşif servisine ulaşılamadı (" .. tostring(res and res.Body or res) .. "). Doğrudan 14-Agent üretimine geçiliyor..."
+		logBox.Text = "⚠️ Keşif servisine ulaşılamadı (" .. tostring(res and res.Body or res) .. "). Doğrudan 15-Agent üretimine geçiliyor..."
 		runAgentWorkflow(activeInitialPrompt ~= "" and activeInitialPrompt or inputText, {}, 1, 0)
 		return
 	end
@@ -2632,7 +2731,7 @@ local function runDiscoveryStep(inputText)
 	promptBox.Text = ""
 
 	if data.status == "ready" then
-		logBox.Text = "✅ Proje Notları kesinleşti! Main Agent seçici yönlendirme ve 13 Alt Agent üretim hattını başlatıyor...\n\n" .. displayTxt
+		logBox.Text = "✅ Proje Notları kesinleşti! Main Agent seçici yönlendirme ve 14 Alt Agent üretim hattını başlatıyor...\n\n" .. displayTxt
 		runBtn.Text = "🚀 Üretiliyor..."
 		runBtn.BackgroundColor3 = C.CARD
 		local finalPrompt = activeInitialPrompt ~= "" and activeInitialPrompt or inputText
@@ -2788,7 +2887,7 @@ runLongBtn.MouseButton1Click:Connect(function()
 	lastSubmittedPrompt = txt
 	runBtn.Text = "Üretiliyor..."
 	runBtn.BackgroundColor3 = C.CARD
-	logBox.Text = string.format("Uzun komut doğrudan 14-Agent hattına gönderiliyor (%d karakter)...", #txt)
+	logBox.Text = string.format("Uzun komut doğrudan 15-Agent hattına gönderiliyor (%d karakter)...", #txt)
 	runAgentWorkflow(txt, {}, 1, 0)
 end)
 
@@ -2805,7 +2904,7 @@ runBtn.MouseButton1Click:Connect(function()
 		lastSubmittedPrompt = txt
 		runBtn.Text = "Üretiliyor..."
 		runBtn.BackgroundColor3 = C.CARD
-		logBox.Text = string.format("14-Agent hattına gönderiliyor (%d karakter)...", #txt)
+		logBox.Text = string.format("15-Agent hattına gönderiliyor (%d karakter)...", #txt)
 		runAgentWorkflow(txt, {}, 1, 0)
 	end
 end)
@@ -2828,7 +2927,7 @@ skipAndBuildBtn.MouseButton1Click:Connect(function()
 	lastSubmittedPrompt = basePrompt
 	runBtn.Text = "🚀 Üretiliyor..."
 	runBtn.BackgroundColor3 = C.CARD
-	logBox.Text = "⚡ Sorular atlandı — mevcut Proje Notları ile 14-Agent üretim hattı hemen başlatılıyor..."
+	logBox.Text = "⚡ Sorular atlandı — mevcut Proje Notları ile 15-Agent üretim hattı hemen başlatılıyor..."
 	runAgentWorkflow(basePrompt, {}, 1, 0, false, activeProjectNotes, activeDiscoverySessionId, activeDiscoveryConversation)
 end)
 
