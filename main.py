@@ -82,7 +82,7 @@ def build_full_state_snapshot() -> dict:
     memories = [dict(m) for m in conn.execute("SELECT * FROM memory_logs ORDER BY id DESC LIMIT 100").fetchall()]
     conn.close()
     return {
-        "backup_version": "4.3-director-fix",
+        "backup_version": "4.5-aaa-studio",
         "synced_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg,
         "users": users,
@@ -190,8 +190,10 @@ def init_db():
             "You are the Principal Roblox Studio Game Architect, 3D Physics Engineer, Rig Animator, Film Director (Blender-style Camera Cinematographer), and Senior Luau Systems Developer.\n"
             "Your objective is to engineer complete, 100% functional, bug-free, and immediately playable or watchable Roblox experiences.\n"
             "Return ONLY a single valid JSON object. NEVER wrap your response in markdown code fences or add extra text.\n\n"
-            "0. SESSION MEMORY & SCENE AWARENESS:\n"
+            "0. SESSION MEMORY, SCENE SCANNER & INCREMENTAL POLISH PROTECTION:\n"
             "- Inspect `GECMIS_HAFIZA` and `scene_hierarchy` first. Resolve target paths from recent edits and the scene tree.\n"
+            "- If usable models, weapons, or rigs already exist inside `scene_hierarchy.Workspace`, REUSE them instead of building crude boxes from scratch.\n"
+            "- INCREMENTAL POLISH PROTECTION: When the user gives a short tweak/polish command (e.g. 'make it faster', 'add screen shake', 'change color'), NEVER delete or overwrite working systems—only edit the specific scripts/properties needed.\n"
             "- Check `project_shortened_index` (`AI_SUMMARY`) to understand existing scripts.\n\n"
             "1. MULTI-STEP AGENTIC FILE INSPECTION LOOP (`need_files`):\n"
             "- When modifying an existing script whose full source code is NOT in `selected_items` or `requested_files_content`, DO NOT guess! Return:\n"
@@ -204,15 +206,16 @@ def init_db():
             "3. BLENDER-STYLE DIRECTOR CAMERA & CUTSCENES (`create_cutscene` & `set_camera`):\n"
             "- When the user wants a cinematic shot, movie sequence, flythrough, zoom-in, or characterless showcase (like Blender's Camera Timeline), ALWAYS use `create_cutscene`!\n"
             "- CRITICAL: When using `create_cutscene`, DO NOT write a separate manual camera `LocalScript` (the plugin automatically installs `AI_DirectorCameraPlayer` with `BindToRenderStep` priority).\n"
-            "- CRITICAL: Make sure `pos` and `look_at` coordinates in `keyframes` match the EXACT world coordinates where your 3D architecture/street is built (e.g., if a street runs along Z from -80 to +80 at Y=0..25, set camera `pos` at [0, 8, 65] and `look_at` at [0, 6, -40] so it looks straight through the street, NEVER into empty sky!).\n"
+            "- CRITICAL: Make sure `pos` and `look_at` coordinates in `keyframes` match the EXACT world coordinates where your 3D architecture/street is built.\n"
             "- Set `\"disable_character\": true` when no playable avatar should spawn (pure cinema mode).\n"
-            "- Define chronological `keyframes` with `time` (seconds), `pos` ([x,y,z]), `look_at` ([x,y,z]) OR dynamic `track_path` (e.g. \"Workspace.Ball\"), `fov` (e.g. 70 wide -> 32 dramatic zoom), `easing` (\"Linear|Sine|Quad|Cubic|Expo\"), and `shake` (0.0 to 2.0).\n"
             "- Use `set_camera` to immediately frame the Studio Edit-Mode viewport camera onto a newly created build.\n\n"
             "4. FUNCTIONAL COMPLETENESS, LOCAL SCRIPT PLACEMENT & EDIT-MODE UI SAFETY:\n"
             "- NEVER set `parent` of a `LocalScript` to `\"StarterPlayer\"` (it will not execute there!). ALWAYS set `parent` of any `LocalScript` to `\"StarterPlayer.StarterPlayerScripts\"`.\n"
             "- Every `ScreenGui` created under `StarterGui` MUST have `\"Enabled\": false` in Edit Mode so it never blocks the viewport! Enable it at runtime inside your `LocalScript`.\n"
             "- If the user says a UI is blocking their screen, find it in `scene_hierarchy.StarterGui` and set `{\"Enabled\": false}` via `edit_instance`.\n\n"
-            "5. 3D ARCHITECTURE, PHYSICS & RIG ANIMATIONS:\n"
+            "5. REAL ROBLOX ASSET, VFX & ANIMATION STANDARDS:\n"
+            "- Strictly obey every directive listed inside `ACTIVE_QUALITY_DIRECTIVES`.\n"
+            "- Prefer authentic Roblox VFX: `ParticleEmitter` (TextureIds: `rbxassetid://243098098` soft glow, `rbxassetid://241650934` spark/slash, `rbxassetid://243660364` smoke/mist), `Trail`, `Beam`, `PointLight`, `BloomEffect`, and `ColorCorrectionEffect`.\n"
             "- Use `run_luau` ONLY for Edit-Mode procedural construction. Put all runtime logic in `write_script`.\n"
             "- Use `RunService.Heartbeat(dt)` instead of `while wait()`.\n"
             "- For Studio Animation Editor `KeyframeSequence` assets, use `create_animation` with chronological `keyframes` and `poses`.\n\n"
@@ -256,6 +259,56 @@ def get_db():
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+# --- DİNAMİK KURAL ENJEKSİYONU (DIRECTIVE INJECTOR) ---
+def build_dynamic_directives(prompt_text: str, directives_cfg: dict) -> list[str]:
+    cfg = directives_cfg or {}
+    auto_mode = cfg.get("auto_mode", True)
+    p = (prompt_text or "").lower()
+
+    req_anim = bool(cfg.get("req_anim", False))
+    req_cam = bool(cfg.get("req_cam", False))
+    req_vfx = bool(cfg.get("req_vfx", False))
+    req_weapon = bool(cfg.get("req_weapon", False))
+
+    if auto_mode:
+        if any(k in p for k in ["combat", "slash", "combo", "punch", "kick", "anime", "boss", "yetenek", "dövüş", "savaş", "saldırı", "animasyon", "ability", "glitch", "skill"]):
+            req_anim = True
+            req_vfx = True
+        if any(k in p for k in ["camera", "kamera", "fov", "shake", "sarsıntı", "cinematic", "sinematik", "showcase", "combat", "aksiyon", "hitstop"]):
+            req_cam = True
+        if any(k in p for k in ["sword", "kılıç", "blade", "weapon", "silah", "katana", "scythe", "staff", "asa", "gun", "tüfek", "ekipman", "spear", "mızrak"]):
+            req_weapon = True
+
+    rules = []
+    if req_anim:
+        rules.append(
+            "[ZORUNLU KARAKTER ANİMASYONU]: Karakter asla kütük gibi sabit kalmamalıdır! "
+            "Saldırı/yetenek anlarında mutlaka R6/R15 Motor6D eklemlerini (RightShoulder, LeftShoulder, Waist/Torso, Neck, RightHip, LeftHip) "
+            "TweenService veya RunService ile akıcı şekilde bükerek dinamik savurma/duruş animasyonları uygula."
+        )
+    if req_cam:
+        rules.append(
+            "[3. ŞAHIS AKSİYON KAMERASI]: Kamerayı dinamik omuz üstü / 3. şahıs aksiyon takip açısına ayarla; "
+            "yetenek ve vuruş anlarında TweenService ile FOV genişlemesi/daralması, mikro kamera sarsıntısı (camera shake) ve darbe anında kısa hitstop ekle."
+        )
+    if req_vfx:
+        rules.append(
+            "[GERÇEK VFX & TRAIL - KUTU/PART YASAĞI]: Patlama, kesik, aura ve darbe efektlerinde sahneye ham geometrik bloklar/küpler saçmak YASAKTIR! "
+            "Bunun yerine mutlaka ParticleEmitter (gerçek doku TextureId: rbxassetid://243098098, rbxassetid://241650934, rbxassetid://243660364), "
+            "Trail, Beam, PointLight ve TweenService ile akıcı sönümlenen şok dalgası/halka efektleri kullan."
+        )
+    if req_weapon:
+        rules.append(
+            "[DETAYLI SİLAH / EKİPMAN RİG'İ]: Tek parça düz neon sopa veya basit dikdörtgen prizma üretmek YASAKTIR! "
+            "Kabza (grip), balçak (guard), süslemeli gövde ve keskin yüzey detaylarıyla karaktere Motor6D/WeldConstraint üzerinden tam oturan çok parçalı estetik bir ekipman oluştur (sahnede hazır silah varsa doğrudan onu kullan)."
+        )
+    if len(p.strip()) < 220:
+        rules.append(
+            "[AŞAMALI YAPILANDIRMA & CİLA KORUMASI]: Bu kısa bir cila/düzenleme komutudur. "
+            "Mevcut çalışan arenayı, HUD'u ve önceki yetenekleri SİLME; yalnızca istenen hız, renk, efekt veya kamera parametresini güncelle."
+        )
+    return rules
 
 def extract_and_repair_json(raw_text: str) -> dict:
     if not raw_text or not raw_text.strip():
@@ -358,11 +411,11 @@ async def web_portal():
         :root { --bg: #09090b; --surface: #121216; --border: #27272a; --accent: #3b82f6; --text: #f4f4f5; --muted: #a1a1aa; --danger: #ef4444; --success: #10b981; --amber: #f59e0b; }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
-        .sidebar { width: 275px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column: gap: 8px; }
+        .sidebar { width: 275px; background: var(--surface); border-right: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
         .sidebar h2 { font-size: 18px; font-weight: 700; margin-bottom: 14px; letter-spacing: -0.5px; }
         .profile-card { background: var(--bg); border: 1px solid var(--border); padding: 12px; border-radius: 8px; margin-bottom: 14px; font-size: 12px; }
         .key-box { background: #18181b; padding: 7px 9px; border-radius: 4px; font-family: monospace; color: var(--success); margin-top: 6px; word-break: break-all; cursor: pointer; border: 1px dashed var(--border); }
-        .nav-btn { background: transparent; border: none; color: var(--muted); padding: 11px 12px; text-align: left; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: 0.15s; }
+        .nav-btn { background: transparent; border: none; color: var(--muted); padding: 11px 12px; text-align: left; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: 0.15s; width: 100%; }
         .nav-btn:hover, .nav-btn.active { background: var(--border); color: #fff; }
         .main { flex: 1; padding: 34px; overflow-y: auto; }
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin-bottom: 24px; }
@@ -613,7 +666,7 @@ function initSession(user) {
     document.getElementById('p-key').innerText = user.client_key;
 
     if (user.role === 'admin') {
-        document.querySelectorAll('.admin-only').forEach(e => e.style.display = 'block');
+        document.querySelectorAll('.nav-btn.admin-only').forEach(e => e.style.display = 'block');
         loadSettings();
         loadUpstashStatus();
         nav('settings', document.querySelectorAll('.nav-btn')[0]);
@@ -1060,7 +1113,7 @@ async def redis_manual_op(request: Request, client_key: str = Header(None)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# --- HAFIZA TEMİZLEME API ---
+# --- HAFIZA TEMİZLEME VE SON ADIMI GERİ ALMA (ROLLBACK) API ---
 @app.delete("/api/agent/memory")
 async def clear_memory(client_key: str = Header(None)):
     user = get_user_by_auth(client_key=client_key)
@@ -1070,6 +1123,21 @@ async def clear_memory(client_key: str = Header(None)):
     conn.close()
     trigger_bg_sync()
     return {"status": "ok"}
+
+@app.post("/api/agent/rollback")
+async def rollback_last_memory(client_key: str = Header(None)):
+    user = get_user_by_auth(client_key=client_key)
+    conn = get_db()
+    last_row = conn.execute("SELECT id FROM memory_logs WHERE user_id=? ORDER BY id DESC LIMIT 1", (user["id"],)).fetchone()
+    deleted = False
+    if last_row:
+        conn.execute("DELETE FROM memory_logs WHERE id=?", (last_row["id"],))
+        conn.commit()
+        deleted = True
+    conn.close()
+    if deleted:
+        trigger_bg_sync()
+    return {"status": "ok", "deleted_last_turn": deleted}
 
 # --- TAM JSON YEDEKLEME (EXPORT / IMPORT) ---
 @app.get("/api/admin/backup/export")
@@ -1204,14 +1272,18 @@ async def log_err(request: Request):
     ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": d.get("type", "Hata"), "details": d.get("details", "")})
     return {"status": "ok"}
 
-# --- ASENKRON ANA AJAN MOTORU (HAFIZA + SUNUCU TARAFLI TOOLBOX ARAMA DÖNGÜSÜ) ---
-async def stream_venice_call(cfg: dict, messages: list, task_id: str) -> str:
+# --- ASENKRON ANA AJAN MOTORU (DÜŞÜNME MODU + DİNAMİK KURAL + TOOLBOX DÖNGÜSÜ) ---
+async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_mode: bool = False) -> str:
     headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
     venice_payload = {
         "model": cfg["chat_model"],
         "stream": True,
+        "max_tokens": 16384,
         "messages": messages
     }
+    if not thinking_mode:
+        venice_payload["venice_parameters"] = {"strip_thinking_response": True}
+
     collected = []
     async with httpx.AsyncClient() as client:
         async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
@@ -1242,12 +1314,24 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     conn = get_db()
     cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
 
-    mem_records = conn.execute("SELECT prompt, ai_summary FROM memory_logs WHERE user_id = ? ORDER BY id DESC LIMIT 8", (user["id"],)).fetchall()
+    # Context Window Trimming: yalnızca son 4 aktif adım hafızada tutulur
+    mem_records = conn.execute("SELECT prompt, ai_summary FROM memory_logs WHERE user_id = ? ORDER BY id DESC LIMIT 4", (user["id"],)).fetchall()
     conn.close()
 
     memory_list = [{"Kullanıcı_Talebi": r["prompt"], "Yaptığın_Düzenlemeler": r["ai_summary"]} for r in reversed(mem_records)]
+    thinking_mode = bool(payload.get("thinking_mode", False))
+    directives_cfg = payload.get("directives", {})
+    active_directives = build_dynamic_directives(payload.get("prompt", ""), directives_cfg)
+
+    mode_instruction = (
+        "\n[DERİN DÜŞÜNME MODU AÇIK]: Karmaşık mimariyi, fizik/animasyon zamanlamalarını ve tüm kenar durumlarını adım adım planlayarak eksiksiz üret."
+        if thinking_mode else
+        "\n[HIZLI MOD AÇIK]: Gereksiz uzun düşünme yapmadan doğrudan en temiz, hızlı ve çalışan JSON aksiyonlarını üret."
+    )
 
     enriched_payload = {
+        "KULLANICI_KOMUTU": payload.get("prompt", ""),
+        "ACTIVE_QUALITY_DIRECTIVES": active_directives,
         "GECMIS_HAFIZA": memory_list,
         "YENI_GOREV": payload
     }
@@ -1256,12 +1340,12 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         TASKS[task_id] = {"status": "failed", "error": "Yönetici henüz Venice API anahtarını girmemiş."}
         return
 
-    LIVE_STATE["status"] = f"{user['username']} için üretiliyor..."
+    LIVE_STATE["status"] = f"{user['username']} ({'Derin' if thinking_mode else 'Hızlı'} Mod) üretiliyor..."
     LIVE_STATE["buffer"] = ""
 
     messages = [
-        {"role": "system", "content": cfg["system_prompt"]},
-        {"role": "user", "content": json.dumps(enriched_payload, ensure_ascii=False)[:65000]}
+        {"role": "system", "content": cfg["system_prompt"] + mode_instruction},
+        {"role": "user", "content": json.dumps(enriched_payload, ensure_ascii=False)[:120000]}
     ]
 
     try:
@@ -1269,7 +1353,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         repaired_json = {}
 
         for _turn in range(2):
-            full_output = await stream_venice_call(cfg, messages, task_id)
+            full_output = await stream_venice_call(cfg, messages, task_id, thinking_mode=thinking_mode)
             total_out_tokens += estimate_tokens(full_output)
             repaired_json = extract_and_repair_json(full_output)
 
@@ -1302,7 +1386,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
 
         actions = repaired_json.get("actions", [])
 
-        if not repaired_json.get("need_files"):
+        if not repaired_json.get("need_files") and not payload.get("is_syntax_repair", False):
             act_descs = [f"{a.get('type')}: {a.get('name') or a.get('path') or a.get('asset_id') or 'nesne'}" for a in actions]
             ai_summary = repaired_json.get("thought", "Düzenlemeler yapıldı.")
             if act_descs:
