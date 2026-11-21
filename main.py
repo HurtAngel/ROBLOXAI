@@ -99,16 +99,18 @@ def apply_full_state_snapshot(data: dict) -> bool:
     if "config" in data and isinstance(data["config"], dict) and data["config"]:
         c = data["config"]
         conn.execute(
-            "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=? WHERE id=1",
+            "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, expander_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=?, expander_prompt=? WHERE id=1",
             (
                 c.get("venice_key", ""),
                 c.get("chat_model", "openai-gpt-oss-120b"),
                 c.get("summarizer_model", "google-gemma-3-27b-it"),
                 c.get("image_model", "seedream-v5-5"),
+                c.get("expander_model") or os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5"),
                 c.get("default_signup_tokens", 30000),
                 c.get("input_cost_mult", 1.0),
                 c.get("output_cost_mult", 2.0),
-                c.get("system_prompt", "")
+                c.get("system_prompt", ""),
+                c.get("expander_prompt") or V6.EXPANDER_PROMPT,
             )
         )
     if "users" in data and isinstance(data["users"], list) and len(data["users"]) > 0:
@@ -166,11 +168,18 @@ def init_db():
         chat_model TEXT,
         summarizer_model TEXT,
         image_model TEXT,
+        expander_model TEXT,
         default_signup_tokens INTEGER,
         input_cost_mult REAL,
         output_cost_mult REAL,
-        system_prompt TEXT
+        system_prompt TEXT,
+        expander_prompt TEXT
     )''')
+    for col, col_type in (("expander_model", "TEXT"), ("expander_prompt", "TEXT")):
+        try:
+            c.execute(f"ALTER TABLE config ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
     c.execute('''CREATE TABLE IF NOT EXISTS memory_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -187,13 +196,17 @@ def init_db():
             ("Admin", hash_pw("1234"), fixed_admin_key, "admin", 999999999)
         )
 
+    default_expander_model = os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
     c.execute("SELECT COUNT(*) FROM config")
     if c.fetchone()[0] == 0:
         default_prompt = V6.CORE_RULES
         c.execute(
-            "INSERT INTO config (id, venice_key, chat_model, summarizer_model, image_model, default_signup_tokens, input_cost_mult, output_cost_mult, system_prompt) VALUES (1, '', 'openai-gpt-oss-120b', 'google-gemma-3-27b-it', 'seedream-v5-5', 30000, 1.0, 2.0, ?)",
-            (default_prompt,)
+            "INSERT INTO config (id, venice_key, chat_model, summarizer_model, image_model, expander_model, default_signup_tokens, input_cost_mult, output_cost_mult, system_prompt, expander_prompt) VALUES (1, '', 'openai-gpt-oss-120b', 'google-gemma-3-27b-it', 'seedream-v5-5', ?, 30000, 1.0, 2.0, ?, ?)",
+            (default_expander_model, default_prompt, V6.EXPANDER_PROMPT)
         )
+    else:
+        c.execute("UPDATE config SET expander_model = ? WHERE id=1 AND (expander_model IS NULL OR expander_model = '')", (default_expander_model,))
+        c.execute("UPDATE config SET expander_prompt = ? WHERE id=1 AND (expander_prompt IS NULL OR expander_prompt = '')", (V6.EXPANDER_PROMPT,))
     conn.commit()
     conn.close()
 
@@ -462,8 +475,9 @@ async def web_portal():
             <h3>Venice API, Çift Model ve Token Maliyet Ayarları</h3>
             <label>Venice.ai API Anahtarı</label>
             <input type="password" id="venice_key">
-            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
                 <div><label>Ana Kodlayıcı Model</label><input type="text" id="chat_model"></div>
+                <div><label>Prompt Zenginleştirici Model (Expander)</label><input type="text" id="expander_model" placeholder="claude-haiku-5-5"></div>
                 <div><label>Özetleyici Model (Indexer)</label><input type="text" id="summarizer_model"></div>
                 <div><label>Görsel Modeli</label><input type="text" id="image_model"></div>
             </div>
@@ -473,7 +487,9 @@ async def web_portal():
                 <div><label>Output Token Çarpanı</label><input type="number" step="0.1" id="output_cost_mult"></div>
             </div>
             <label>Evrensel Sistem Talimatı (System Prompt)</label>
-            <textarea id="system_prompt" rows="12"></textarea>
+            <textarea id="system_prompt" rows="10"></textarea>
+            <label>Prompt Zenginleştirici Sistem Talimatı (Expander Prompt)</label>
+            <textarea id="expander_prompt" rows="12"></textarea>
             <button class="btn" onclick="saveSettings()">Ayarları Kaydet (ve Upstash'e Eşitle)</button>
         </div>
     </div>
@@ -672,24 +688,28 @@ async function loadSettings() {
     const cfg = await res.json();
     document.getElementById('venice_key').value = cfg.venice_key || '';
     document.getElementById('chat_model').value = cfg.chat_model || '';
+    document.getElementById('expander_model').value = cfg.expander_model || 'claude-haiku-5-5';
     document.getElementById('summarizer_model').value = cfg.summarizer_model || '';
     document.getElementById('image_model').value = cfg.image_model || '';
     document.getElementById('default_signup_tokens').value = cfg.default_signup_tokens || 30000;
     document.getElementById('input_cost_mult').value = cfg.input_cost_mult || 1.0;
     document.getElementById('output_cost_mult').value = cfg.output_cost_mult || 2.0;
     document.getElementById('system_prompt').value = cfg.system_prompt || '';
+    document.getElementById('expander_prompt').value = cfg.expander_prompt || '';
 }
 
 async function saveSettings() {
     await apiFetch('/api/admin/config', 'POST', {
         venice_key: document.getElementById('venice_key').value.trim(),
         chat_model: document.getElementById('chat_model').value.trim(),
+        expander_model: document.getElementById('expander_model').value.trim() || 'claude-haiku-5-5',
         summarizer_model: document.getElementById('summarizer_model').value.trim(),
         image_model: document.getElementById('image_model').value.trim(),
         default_signup_tokens: parseInt(document.getElementById('default_signup_tokens').value) || 30000,
         input_cost_mult: parseFloat(document.getElementById('input_cost_mult').value) || 1.0,
         output_cost_mult: parseFloat(document.getElementById('output_cost_mult').value) || 2.0,
-        system_prompt: document.getElementById('system_prompt').value
+        system_prompt: document.getElementById('system_prompt').value,
+        expander_prompt: document.getElementById('expander_prompt').value
     });
     alert('Ayarlar kaydedildi ve Upstash Redis ile eşitlendi.');
 }
@@ -933,19 +953,25 @@ async def get_conf(client_key: str = Header(None)):
     if get_user_by_auth(client_key=client_key)["role"] != "admin":
         raise HTTPException(status_code=403)
     conn = get_db()
-    cfg = conn.execute("SELECT * FROM config WHERE id=1").fetchone()
+    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
     conn.close()
-    return dict(cfg)
+    if not cfg.get("expander_model"):
+        cfg["expander_model"] = os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
+    if not cfg.get("expander_prompt"):
+        cfg["expander_prompt"] = V6.EXPANDER_PROMPT
+    return cfg
 
 @app.post("/api/admin/config")
 async def save_conf(request: Request, client_key: str = Header(None)):
     if get_user_by_auth(client_key=client_key)["role"] != "admin":
         raise HTTPException(status_code=403)
     d = await request.json()
+    expander_model = (d.get("expander_model") or "").strip() or os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
+    expander_prompt = d.get("expander_prompt") or V6.EXPANDER_PROMPT
     conn = get_db()
     conn.execute(
-        "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=? WHERE id=1",
-        (d["venice_key"], d["chat_model"], d["summarizer_model"], d["image_model"], d["default_signup_tokens"], d["input_cost_mult"], d["output_cost_mult"], d["system_prompt"])
+        "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, expander_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=?, expander_prompt=? WHERE id=1",
+        (d["venice_key"], d["chat_model"], d["summarizer_model"], d["image_model"], expander_model, d["default_signup_tokens"], d["input_cost_mult"], d["output_cost_mult"], d["system_prompt"], expander_prompt)
     )
     conn.commit()
     conn.close()
@@ -1724,12 +1750,13 @@ async def expand_prompt_endpoint(request: Request, client_key: str = Header(None
         return JSONResponse({"error": "Yönetici henüz Venice API anahtarını girmemiş."}, status_code=400)
 
     headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
+    expander_sys_prompt = (cfg.get("expander_prompt") or "").strip() or V6.EXPANDER_PROMPT
     messages = [
-        {"role": "system", "content": V6.EXPANDER_PROMPT},
+        {"role": "system", "content": expander_sys_prompt},
         {"role": "user", "content": raw_prompt},
     ]
 
-    primary_model = os.environ.get("EXPANDER_MODEL", EXPANDER_MODEL).strip() or "claude-haiku-5-5"
+    primary_model = (cfg.get("expander_model") or "").strip() or os.environ.get("EXPANDER_MODEL", EXPANDER_MODEL).strip() or "claude-haiku-5-5"
     fallback_model = cfg.get("chat_model") or primary_model
     models_to_try = [primary_model] if fallback_model == primary_model else [primary_model, fallback_model]
 
