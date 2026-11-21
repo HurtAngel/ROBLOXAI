@@ -9,6 +9,9 @@ import hashlib
 import httpx
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import prompts_v6 as V6
 
 try:
     from duckduckgo_search import DDGS
@@ -186,54 +189,7 @@ def init_db():
 
     c.execute("SELECT COUNT(*) FROM config")
     if c.fetchone()[0] == 0:
-        default_prompt = (
-            "You are the Principal Roblox Studio Game Architect, 3D Physics Engineer, Rig Animator, Film Director (Blender-style Camera Cinematographer), and Senior Luau Systems Developer.\n"
-            "Your objective is to engineer complete, 100% functional, bug-free, and immediately playable or watchable Roblox experiences.\n"
-            "Return ONLY a single valid JSON object. NEVER wrap your response in markdown code fences or add extra text.\n\n"
-            "0. SESSION MEMORY, SCENE SCANNER & INCREMENTAL POLISH PROTECTION:\n"
-            "- Inspect `GECMIS_HAFIZA` and `scene_hierarchy` first. Resolve target paths from recent edits and the scene tree.\n"
-            "- If usable models, weapons, or rigs already exist inside `scene_hierarchy.Workspace`, REUSE them instead of building crude boxes from scratch.\n"
-            "- INCREMENTAL POLISH PROTECTION: When the user gives a short tweak/polish command (e.g. 'make it faster', 'add screen shake', 'change color'), NEVER delete or overwrite working systems—only edit the specific scripts/properties needed.\n"
-            "- Check `project_shortened_index` (`AI_SUMMARY`) to understand existing scripts.\n\n"
-            "1. MULTI-STEP AGENTIC FILE INSPECTION LOOP (`need_files`):\n"
-            "- When modifying an existing script whose full source code is NOT in `selected_items` or `requested_files_content`, DO NOT guess! Return:\n"
-            "  {\"thought\": \"Inspecting full source code of target scripts.\", \"need_files\": [\"Full.Service.Path\"], \"actions\": []}\n"
-            "- Never request the same file twice. Once delivered, apply `edit_script`.\n\n"
-            "2. REAL 3D MODEL SEARCH & PLACEMENT (`search_toolbox` + `insert_asset`):\n"
-            "- For realistic 3D models (mansions, cars, trees, weapons, props), search Roblox Toolbox first:\n"
-            "  {\"thought\": \"Searching Roblox Toolbox for 3D models.\", \"search_toolbox\": [\"modern mansion\", \"sports car\"], \"actions\": []}\n"
-            "- Once `TOOLBOX_ARAMA_SONUCLARI` arrives, place chosen models with `insert_asset` (`position`, `rotation`, `scale`, `strip_scripts: true`).\n\n"
-            "3. BLENDER-STYLE DIRECTOR CAMERA & CUTSCENES (`create_cutscene` & `set_camera`):\n"
-            "- When the user wants a cinematic shot, movie sequence, flythrough, zoom-in, or characterless showcase (like Blender's Camera Timeline), ALWAYS use `create_cutscene`!\n"
-            "- CRITICAL: When using `create_cutscene`, DO NOT write a separate manual camera `LocalScript` (the plugin automatically installs `AI_DirectorCameraPlayer` with `BindToRenderStep` priority).\n"
-            "- CRITICAL: Make sure `pos` and `look_at` coordinates in `keyframes` match the EXACT world coordinates where your 3D architecture/street is built.\n"
-            "- Set `\"disable_character\": true` when no playable avatar should spawn (pure cinema mode).\n"
-            "- Use `set_camera` to immediately frame the Studio Edit-Mode viewport camera onto a newly created build.\n\n"
-            "4. FUNCTIONAL COMPLETENESS, LOCAL SCRIPT PLACEMENT & EDIT-MODE UI SAFETY:\n"
-            "- NEVER set `parent` of a `LocalScript` to `\"StarterPlayer\"` (it will not execute there!). ALWAYS set `parent` of any `LocalScript` to `\"StarterPlayer.StarterPlayerScripts\"`.\n"
-            "- Every `ScreenGui` created under `StarterGui` MUST have `\"Enabled\": false` in Edit Mode so it never blocks the viewport! Enable it at runtime inside your `LocalScript`.\n"
-            "- If the user says a UI is blocking their screen, find it in `scene_hierarchy.StarterGui` and set `{\"Enabled\": false}` via `edit_instance`.\n\n"
-            "5. REAL ROBLOX ASSET, VFX & ANIMATION STANDARDS:\n"
-            "- Strictly obey every directive listed inside `ACTIVE_QUALITY_DIRECTIVES`.\n"
-            "- Prefer authentic Roblox VFX: `ParticleEmitter` (TextureIds: `rbxassetid://243098098` soft glow, `rbxassetid://241650934` spark/slash, `rbxassetid://243660364` smoke/mist), `Trail`, `Beam`, `PointLight`, `BloomEffect`, and `ColorCorrectionEffect`.\n"
-            "- Use `run_luau` ONLY for Edit-Mode procedural construction. Put all runtime logic in `write_script`.\n"
-            "- Use `RunService.Heartbeat(dt)` instead of `while wait()`.\n"
-            "- OFFICIAL RIG CREATION (ANIMATION EDITOR READY): NEVER build humanoid characters/NPCs/bosses from raw `Part`s! ALWAYS spawn an official R15/R6 rig via `run_luau` using `Players:CreateHumanoidModelFromDescription(Instance.new(\"HumanoidDescription\"), Enum.HumanoidRigType.R15)` (or `R6`), set `HumanoidRootPart.Anchored = true` and ALL other BaseParts `Anchored = false`, then customize appearance/weapons.\n"
-            "- For Studio Animation Editor `KeyframeSequence` assets, use `create_animation` with chronological `keyframes`, `poses`, and the exact `rig_path` (e.g. `Workspace.RigName`) so it is saved into `Rig.AnimSaves`.\n\n"
-            "6. SUPPORTED JSON ACTION FORMATS:\n"
-            "- {\"type\": \"create_instance\", \"class\": \"Part|ScreenGui|Frame|RemoteEvent\", \"name\": \"...\", \"parent\": \"Workspace|StarterGui|ReplicatedStorage\", \"properties\": {...}}\n"
-            "- {\"type\": \"edit_instance\", \"path\": \"...\", \"properties\": {...}}\n"
-            "- {\"type\": \"delete_instance\", \"path\": \"...\"}\n"
-            "- {\"type\": \"write_script\", \"script_type\": \"Script|LocalScript|ModuleScript\", \"name\": \"...\", \"parent\": \"ServerScriptService|StarterPlayer.StarterPlayerScripts|StarterGui|ReplicatedStorage\", \"source\": \"...\"}\n"
-            "- {\"type\": \"edit_script\", \"path\": \"...\", \"source\": \"...\"}\n"
-            "- {\"type\": \"create_animation\", \"name\": \"SwordSlash\", \"rig_path\": \"Workspace.Rig\", \"loop\": false, \"priority\": \"Action\", \"keyframes\": [{\"time\": 0.0, \"poses\": {\"RightUpperArm\": {\"pos\": [0,0,0], \"rot\": [-45,0,15], \"easing\": \"Cubic\"}}}]}\n"
-            "- {\"type\": \"create_cutscene\", \"name\": \"MainCutscene\", \"disable_character\": true, \"loop\": true, \"cinematic_bars\": true, \"keyframes\": [{\"time\": 0.0, \"pos\": [0,8,60], \"look_at\": [0,6,-20], \"fov\": 70, \"easing\": \"Cubic\", \"shake\": 0}, {\"time\": 5.0, \"pos\": [0,7,-10], \"look_at\": [0,6,-80], \"fov\": 35, \"easing\": \"Sine\", \"shake\": 0.15}]}\n"
-            "- {\"type\": \"set_camera\", \"position\": [25,18,35], \"look_at\": [0,5,0], \"target_path\": \"\", \"fov\": 65}\n"
-            "- {\"type\": \"insert_asset\", \"asset_id\": 123456, \"name\": \"...\", \"parent\": \"Workspace\", \"position\": [0,5,0], \"rotation\": [0,0,0], \"scale\": 1.0, \"strip_scripts\": true}\n"
-            "- {\"type\": \"run_luau\", \"description\": \"...\", \"code\": \"...\"}\n"
-            "- {\"type\": \"terrain_fill\", \"material\": \"Grass\", \"position\": [0,0,0], \"size\": [100,10,100]}\n"
-            "- {\"type\": \"create_plugin\", \"name\": \"...\", \"source\": \"...\"}"
-        )
+        default_prompt = V6.CORE_RULES
         c.execute(
             "INSERT INTO config (id, venice_key, chat_model, summarizer_model, image_model, default_signup_tokens, input_cost_mult, output_cost_mult, system_prompt) VALUES (1, '', 'openai-gpt-oss-120b', 'google-gemma-3-27b-it', 'seedream-v5-5', 30000, 1.0, 2.0, ?)",
             (default_prompt,)
@@ -289,54 +245,33 @@ def build_dynamic_directives(prompt_text: str, directives_cfg: dict) -> list[str
     rules = []
     if req_rig:
         rules.append(
-            "[RESMİ ROBLOX RIG, RENKLENDİRME & ANCHORED KURALI]: İnsansı bir karakter, NPC, Dummy veya Boss oluştururken "
-            "ASLA sıfırdan ham Part/blok birleştirerek karakter yapma! "
-            "Bunun yerine `run_luau` aksiyonu ile mutlaka Roblox'un resmi R15/R6 rig üreticisini kullan ve çağırmadan önce `HumanoidDescription` renklerini mutlaka ata (yoksa NPC simsiyah çıkar):\n"
-            "local Players = game:GetService('Players'); "
-            "local desc = Instance.new('HumanoidDescription'); "
-            "desc.HeadColor = Color3.fromRGB(245, 205, 165); desc.LeftArmColor = desc.HeadColor; desc.RightArmColor = desc.HeadColor; "
-            "desc.TorsoColor = Color3.fromRGB(52, 110, 210); desc.LeftLegColor = Color3.fromRGB(45, 50, 62); desc.RightLegColor = desc.LeftLegColor; "
-            "local rig = Players:CreateHumanoidModelFromDescription(desc, Enum.HumanoidRigType.R15) -- (R6 istenirse R6); "
-            "rig.Name = 'RigAdi'; rig.Parent = workspace; rig:PivotTo(CFrame.new(0, 5, 0)); "
-            "for _, p in ipairs(rig:GetDescendants()) do if p:IsA('BasePart') then p.Anchored = false end end\n"
-            "KRİTİK ANCHORED YASAĞI: Yürümesi veya hareket etmesi istenen karakter/NPC riglerinde `HumanoidRootPart` DAHİL hiçbir parça `Anchored = true` YAPILMAYACAK (yalnızca tamamen hareketsiz heykel/manken ise sadece `HumanoidRootPart.Anchored = true` yapılabilir). "
-            "ASLA `run_luau` içinde elle `KeyframeSequence`/`Pose` yazma — animasyonları SADECE `create_animation` aksiyonu ile `\"rig_path\": \"Workspace.RigAdi\"` vererek üret."
+            "[RIG]: Every humanoid character/NPC must be created with the `spawn_rig` action (official rig, colors, "
+            "walk/run/idle animations and movement brain are automatic). Never build characters from Parts or run_luau. "
+            "Moving NPCs are never anchored; use behavior 'static' only for statues/mannequins."
         )
     if req_anim:
         rules.append(
-            "[ZORUNLU KARAKTER ANİMASYONU - 3 KATI KURAL]: Karakter asla kütük gibi sabit kalmamalıdır! "
-            "Hem Studio Animation Editor için `create_animation` ile tam R15/R6 keyframe animasyonu üret (doğru `rig_path` ile), "
-            "hem de çalışma zamanı animasyonlarında şu 3 katı kurala KESİNLİKLE uy:\n"
-            "1) TOOL KULLANMA YASAĞI: Silahı/ekipmanı ASLA `Instance.new('Tool')` ile yapma (klasik kol kaldırma animasyonunu tetikler ve Grip açısını bozar). "
-            "Silahı doğrudan `Model` olarak yaratıp `Motor6D` ile `RightHand` (R15) veya `Right Arm` (R6) içine bağla.\n"
-            "2) ANIMATE SCRİPTİNİ GEÇİCİ SUSTURMA: Özel yetenek/saldırı animasyonu oynarken karakterin `Animate` scriptini geçici olarak devre dışı bırak (`Animate.Disabled = true`), poz/vuruş bitince tekrar aç (`Animate.Disabled = false`); yoksa varsayılan koşu/bekleme animasyonu Motor6D açılarını ezer.\n"
-            "3) DOĞRUDAN Motor6D.Transform KULLANIMI: `Motor6D.C0` tweenlemek yerine, `RunService.Stepped` içinde ilgili eklemlerin (RightShoulder, LeftShoulder, Waist/Torso, Neck, RightHip, LeftHip) `Motor6D.Transform` CFrame'ini doğrudan ez (overwrite et) — animasyon motorunun üstüne garantili yazmanın tek yolu budur.\n"
-            "4) REGISTERKEYFRAMESEQUENCE İSTEMCİ (CLIENT) KURALI: `KeyframeSequenceProvider:RegisterKeyframeSequence()` ile üretilen yerel animasyon ID'leri (rbxassetid://... hash'leri) YALNIZCA istemci tarafında (`LocalScript` içinde) çalışır; sunucu (`ServerScriptService`) üzerindeki `Script` içinden oynatılan yerel `KeyframeSequence` animasyonları istemcide görünmez! "
-            "Bu nedenle `ReplicatedStorage.AI_Animations` içindeki animasyonların TÜM oynatma (`RegisterKeyframeSequence` + `Animator:LoadAnimation`) işlemleri HER ZAMAN `StarterPlayer.StarterPlayerScripts` altında oluşturulacak bir `LocalScript` tarafından yürütülmelidir (NPC'ler dahil!). "
-            "Sunucu (`ServerScriptService`) `Script`i sadece karakterleri/NPC'leri hareket ettirsin (`Humanoid:MoveTo`) ve gerekirse `RemoteEvent` ile istemciye hangi aksiyonun oynatılacağını bildirsin."
+            "[ANIMATION]: Create animations with `create_animation` using a `preset` whenever possible "
+            "(idle, walk, run, jump, kick, throw, swing, jab, block, wave, sit, dance, celebrate). "
+            "Play them in scripts ONLY with AIKit.PlayAnim(model, name). Weapons: Model welded to the hand, never a Tool."
         )
     if req_cam:
         rules.append(
-            "[SİNEMATİK KAMERA, FOV/POV GEÇİŞLERİ & BLUR/POST-FX]: Kamera asla sabit ve tekdüze kalmamalıdır! "
-            "Çoklu POV açıları (geniş plan, omuz üstü, alt açı, yakın plan), dramatik FOV değişimleri (örn. 75 -> 38 -> 85), "
-            "kamera sarsıntısı (shake), hitstop ve Lighting altında mutlaka `BlurEffect` + `DepthOfFieldEffect` + `BloomEffect` + `ColorCorrectionEffect` "
-            "kullanarak geçişlerde TweenService ile akıcı blur/odak ve FOV animasyonları uygula."
+            "[CAMERA]: Use `setup_camera` (third_person / follow / top_down / side_scroller / broadcast ...) for gameplay cameras, "
+            "`create_cutscene` for cinematic shots, and AIKit.Shake / FovPunch / Blur for hit effects. Do not write camera scripts."
         )
     if req_vfx:
         rules.append(
-            "[GERÇEK VFX & TRAIL - KUTU/PART YASAĞI]: Patlama, kesik, aura ve darbe efektlerinde sahneye ham geometrik bloklar/küpler saçmak YASAKTIR! "
-            "Bunun yerine mutlaka ParticleEmitter (gerçek doku TextureId: rbxassetid://243098098, rbxassetid://241650934, rbxassetid://243660364), "
-            "Trail, Beam, PointLight ve TweenService ile akıcı sönümlenen şok dalgası/halka efektleri kullan."
+            "[VFX]: Use ParticleEmitter (rbxassetid://243098098 glow, rbxassetid://241650934 spark, rbxassetid://243660364 smoke), "
+            "Trail, Beam, PointLight and TweenService fades — never spray raw cube Parts as effects."
         )
     if req_weapon:
         rules.append(
-            "[DETAYLI SİLAH / EKİPMAN RİG'İ]: Tek parça düz neon sopa veya basit dikdörtgen prizma üretmek YASAKTIR! "
-            "Kabza (grip), balçak (guard), süslemeli gövde ve keskin yüzey detaylarıyla karaktere Motor6D/WeldConstraint üzerinden tam oturan çok parçalı estetik bir ekipman oluştur (sahnede hazır silah varsa doğrudan onu kullan)."
+            "[EQUIPMENT]: Build multi-part equipment (grip, guard, body, details) welded to the hand with WeldConstraint/Motor6D; reuse scene models if present."
         )
-    if len(p.strip()) < 220:
+    if len(p.strip()) < 220 and not V6.needs_blueprint(prompt_text, {}):
         rules.append(
-            "[AŞAMALI YAPILANDIRMA & CİLA KORUMASI]: Bu kısa bir cila/düzenleme komutudur. "
-            "Mevcut çalışan arenayı, HUD'u ve önceki yetenekleri SİLME; yalnızca istenen hız, renk, efekt veya kamera parametresini güncelle."
+            "[POLISH]: This is a short tweak. Keep all working systems; change only what was asked."
         )
     return rules
 
@@ -1468,10 +1403,30 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     base_sys = cfg["system_prompt"] + mode_instruction
     user_json_str = json.dumps(enriched_payload, ensure_ascii=False)[:120000]
     is_syntax_repair = bool(payload.get("is_syntax_repair", False))
+    prompt_text = payload.get("prompt", "")
 
-    STAGE1_ALLOWED = {"create_instance", "edit_instance", "delete_instance", "insert_asset", "terrain_fill", "run_luau", "set_camera"}
-    STAGE2_ALLOWED = {"create_animation", "create_cutscene", "set_camera", "create_instance"}
+    # V6: her aşamada SADECE izinli araçlar (sunucu tarafı filtre)
+    STAGE1_ALLOWED = {"create_instance", "edit_instance", "delete_instance", "insert_asset", "terrain_fill", "run_luau", "set_camera", "spawn_rig"}
+    STAGE2_ALLOWED = {"create_animation", "create_cutscene", "set_camera", "create_instance", "setup_camera"}
     STAGE3_ALLOWED = {"write_script", "edit_script", "delete_instance", "create_instance"}
+    STAGE2_INSTANCE_CLASSES = {"BlurEffect", "DepthOfFieldEffect", "BloomEffect", "ColorCorrectionEffect", "SunRaysEffect", "Atmosphere", "Sky"}
+
+    def summarize_actions(acts):
+        out = []
+        for a in acts:
+            item = {"type": a.get("type")}
+            for k in ("name", "path", "parent", "class", "rig_type", "behavior", "preset", "mode", "target_path", "script_type"):
+                if a.get(k) not in (None, ""):
+                    item[k] = a.get(k)
+            props = a.get("properties") or {}
+            if isinstance(props, dict):
+                for k in ("Position", "Size"):
+                    if k in props:
+                        item[k] = props[k]
+            if a.get("position") is not None:
+                item["position"] = a.get("position")
+            out.append(item)
+        return out
 
     try:
         total_out_tokens = 0
@@ -1479,36 +1434,59 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
 
         if is_syntax_repair:
             messages = [
-                {"role": "system", "content": base_sys},
+                {"role": "system", "content": V6.build_stage_prompt(3, cfg["system_prompt"], mode_instruction)},
                 {"role": "user", "content": user_json_str}
             ]
             full_output = await stream_venice_call(cfg, messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Syntax Onarımı]")
             total_out_tokens += estimate_tokens(full_output)
             repaired_json = extract_and_repair_json(full_output)
         else:
-            # --- V5 HARD-GUARDRAIL: 1 INPUT -> 3 SIRALI OUTPUT + TOOL MASKING ---
             combined_actions = []
             combined_thoughts = []
             stage_summaries = []
+            scene_compact = V6.compact_scene(payload.get("scene_hierarchy", {}))
 
-            # AŞAMA 1/3: YAPILAR, SAHNE & RESMİ ROBLOX RİGLERİ
-            s1_base = mask_system_prompt_tools(base_sys, {"write_script", "edit_script", "create_animation", "create_cutscene", "create_plugin"})
-            stage1_sys = s1_base + (
-                "\n\n[AŞAMA 1/3 - TOOL MASKING: SADECE YAPILAR, 3D SAHNE & RESMİ RİGLER]:\n"
-                "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `create_instance`, `edit_instance`, `delete_instance`, `insert_asset`, `terrain_fill`, `run_luau`, `set_camera`.\n"
-                "- YASAKLI ARAÇLAR (BU AŞAMADA GİZLİ / SİLİNİR): `write_script`, `edit_script`, `create_animation`, `create_cutscene`.\n"
-                "- İnsansı karakter/NPC/Boss için ASLA sıfırdan ham Part birleştirme! `CreateHumanoidModelFromDescription` çağırmadan önce `HumanoidDescription` ten/kıyafet renklerini (`HeadColor`, `TorsoColor`, `LeftArmColor`, `RightArmColor`, `LeftLegColor`, `RightLegColor`) mutlaka ata ki NPC simsiyah çıkmasın.\n"
-                "- Yürüyen/hareket eden NPC'lerde `HumanoidRootPart` DAHİL hiçbir parça `Anchored = true` YAPILMAYACAK (tüm BasePart'lar `Anchored = false`; yalnızca hareketsiz heykel/manken sabitlenebilir).\n"
-                "- Eğer görevde yeni yapı/rig gerekmiyorsa `actions: []` döndür."
-            )
-            LIVE_STATE["status"] = f"{user['username']} | Aşama 1/3: Yapılar & Resmi Rigler..."
+            # AŞAMA 0: OYUN PLANI (kısa müşteri promptunu somut plana çevirir)
+            blueprint = {}
+            if V6.needs_blueprint(prompt_text, payload):
+                LIVE_STATE["status"] = f"{user['username']} | Aşama 0: Oyun Planı..."
+                try:
+                    bp_messages = [
+                        {"role": "system", "content": V6.BLUEPRINT_PROMPT},
+                        {"role": "user", "content": json.dumps({
+                            "MUSTERI_ISTEGI": prompt_text,
+                            "SAHNEDE_OLANLAR": scene_compact,
+                            "GECMIS_HAFIZA": memory_list,
+                        }, ensure_ascii=False)[:40000]}
+                    ]
+                    bp_out = await stream_venice_call(cfg, bp_messages, task_id, thinking_mode=False, stage_prefix="[Aşama 0: Oyun Planı]")
+                    total_out_tokens += estimate_tokens(bp_out)
+                    bp_json = extract_and_repair_json(bp_out)
+                    if isinstance(bp_json, dict) and not bp_json.get("actions"):
+                        blueprint = {k: v for k, v in bp_json.items() if k not in ("actions", "need_files", "search_toolbox", "thought")}
+                    if blueprint.get("summary"):
+                        combined_thoughts.append("[0 Plan] " + str(blueprint.get("title", "")) + ": " + str(blueprint.get("summary")))
+                except Exception as bp_err:
+                    ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Blueprint Hatası", "details": str(bp_err)})
+                    blueprint = {}
+
+            # AŞAMA 1/3: DÜNYA, HARİTA, PROPLAR & KARAKTERLER
+            stage1_sys = V6.build_stage_prompt(1, cfg["system_prompt"], mode_instruction, active_directives)
+            LIVE_STATE["status"] = f"{user['username']} | Aşama 1/3: Dünya & Karakterler..."
+            s1_payload = {
+                "KULLANICI_KOMUTU": prompt_text,
+                "OYUN_PLANI": V6.blueprint_for_stage(blueprint, 1),
+                "SCENE_HIERARCHY": scene_compact,
+                "SELECTED_ITEMS": payload.get("selected_items", []),
+                "GECMIS_HAFIZA": memory_list,
+            }
             s1_messages = [
                 {"role": "system", "content": stage1_sys},
-                {"role": "user", "content": user_json_str}
+                {"role": "user", "content": json.dumps(s1_payload, ensure_ascii=False)[:100000]}
             ]
             s1_json = {}
             for _turn in range(2):
-                s1_out = await stream_venice_call(cfg, s1_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 1/3: Yapılar & Resmi Rigler]")
+                s1_out = await stream_venice_call(cfg, s1_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 1/3: Dünya & Karakterler]")
                 total_out_tokens += estimate_tokens(s1_out)
                 s1_json = extract_and_repair_json(s1_out)
 
@@ -1518,8 +1496,8 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
 
                 queries = s1_json.get("search_toolbox") or []
                 if queries and isinstance(queries, list) and _turn == 0:
-                    LIVE_STATE["status"] = f"Aşama 1/3 Toolbox aranıyor: {', '.join(queries[:4])}"
-                    TASKS[task_id]["buffer"] = f"[Aşama 1/3] Roblox Toolbox'ta 3D modeller aranıyor: {', '.join(queries[:4])}..."
+                    LIVE_STATE["status"] = f"Aşama 1/3 Toolbox aranıyor: {', '.join(map(str, queries[:4]))}"
+                    TASKS[task_id]["buffer"] = f"[Aşama 1/3] Roblox Toolbox'ta 3D modeller aranıyor: {', '.join(map(str, queries[:4]))}..."
                     toolbox_results = {}
                     for q in queries[:4]:
                         toolbox_results[str(q)] = await search_roblox_toolbox(str(q), limit=6)
@@ -1529,126 +1507,137 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                         "content": (
                             "TOOLBOX_ARAMA_SONUCLARI:\n"
                             + json.dumps(toolbox_results, ensure_ascii=False)
-                            + "\nŞimdi en uygun AssetId'leri seçerek SADECE Aşama 1/3 (Yapılar, 3D modeller ve Resmi Rigler) aksiyonlarını döndür. Tekrar search_toolbox çağırma."
+                            + "\nNow pick suitable AssetIds and return the full STAGE 1 actions. Do not call search_toolbox again."
                         )
                     })
                     continue
                 break
 
             if not repaired_json.get("need_files"):
-                s1_actions = [a for a in (s1_json.get("actions") or []) if a.get("type") in STAGE1_ALLOWED]
+                s1_actions = [a for a in (s1_json.get("actions") or []) if isinstance(a, dict) and a.get("type") in STAGE1_ALLOWED]
                 combined_actions.extend(s1_actions)
                 if s1_json.get("thought"):
-                    combined_thoughts.append("[1/3 Yapılar] " + str(s1_json.get("thought")))
+                    combined_thoughts.append("[1/3 Dünya] " + str(s1_json.get("thought")))
+                spawned_rigs = [
+                    {"name": a.get("name"), "path": f"{a.get('parent') or 'Workspace'}.{a.get('name')}", "rig_type": a.get("rig_type", "R15"), "behavior": a.get("behavior", "idle")}
+                    for a in s1_actions if a.get("type") == "spawn_rig"
+                ]
                 stage_summaries.append({
-                    "stage": "1_structures_and_rigs",
+                    "stage": "1_world_and_characters",
                     "thought": s1_json.get("thought", ""),
-                    "actions_summary": [
-                        {"type": a.get("type"), "name": a.get("name"), "path": a.get("path"), "parent": a.get("parent"), "description": a.get("description")}
-                        for a in s1_actions
-                    ]
+                    "spawned_rigs": spawned_rigs,
+                    "actions_summary": summarize_actions(s1_actions)[:120]
                 })
 
-                # AŞAMA 2/3: ANİMASYONLAR & SİNEMATİK KAMERA (FOV, POV, BLUR/DOF)
-                rig_hint_block = ("\n" + "\n".join(rig_type_hints)) if rig_type_hints else ""
-                s2_base = mask_system_prompt_tools(base_sys, {"write_script", "edit_script", "run_luau", "insert_asset", "terrain_fill", "delete_instance", "edit_instance", "create_plugin"})
-                stage2_sys = s2_base + (
-                    "\n\n[AŞAMA 2/3 - TOOL MASKING: SADECE ANİMASYONLAR, SİNEMATİK KAMERA (FOV/POV) VE BLUR/POST-FX]:\n"
-                    "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `create_animation`, `create_cutscene`, `set_camera`, (ve sadece `Lighting` altı Post-FX için `create_instance`: BlurEffect, DepthOfFieldEffect, BloomEffect, ColorCorrectionEffect).\n"
-                    "- YASAKLI ARAÇLAR (BU AŞAMADA GİZLİ / SİLİNİR): `write_script`, `edit_script`, `run_luau`.\n"
-                    "- `create_animation` aksiyonlarını doğru `rig_path` (örn. `Workspace.RigAdi`) ve rig tipine (R6 vs R15) tam uyumlu eklem isimleriyle üret.\n"
-                    "- Sinematik kamera gerekiyorsa `create_cutscene` ile çoklu POV açıları, belirgin FOV değişimleri (75 -> 38 -> 85) ve `shake` ekle."
-                    + rig_hint_block
-                )
-                LIVE_STATE["status"] = f"{user['username']} | Aşama 2/3: Animasyonlar & Kamera/Blur..."
+                # AŞAMA 2/3: ANİMASYONLAR, OYUN KAMERASI & POST-FX
+                s2_notes = list(rig_type_hints)
+                if spawned_rigs:
+                    s2_notes.append("Rigs spawned in stage 1 (walk/run/idle already automatic): " + ", ".join(f"{r['path']} ({r['rig_type']})" for r in spawned_rigs))
+                stage2_sys = V6.build_stage_prompt(2, cfg["system_prompt"], mode_instruction, s2_notes)
+                LIVE_STATE["status"] = f"{user['username']} | Aşama 2/3: Animasyonlar & Kamera..."
                 s2_payload = {
-                    "KULLANICI_KOMUTU": payload.get("prompt", ""),
-                    "ACTIVE_QUALITY_DIRECTIVES": active_directives,
-                    "ASAMA_1_YAPILAR_VE_RIGLER": stage_summaries[0],
-                    "SCENE_HIERARCHY": payload.get("scene_hierarchy", {}),
+                    "KULLANICI_KOMUTU": prompt_text,
+                    "OYUN_PLANI": V6.blueprint_for_stage(blueprint, 2),
+                    "ASAMA_1": stage_summaries[0],
+                    "SCENE_HIERARCHY": scene_compact,
                     "SELECTED_ITEMS": payload.get("selected_items", [])
                 }
                 s2_messages = [
                     {"role": "system", "content": stage2_sys},
                     {"role": "user", "content": json.dumps(s2_payload, ensure_ascii=False)[:100000]}
                 ]
-                s2_out = await stream_venice_call(cfg, s2_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 2/3: Animasyonlar & Kamera/FOV/Blur]")
+                s2_out = await stream_venice_call(cfg, s2_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 2/3: Animasyonlar & Kamera]")
                 total_out_tokens += estimate_tokens(s2_out)
                 s2_json = extract_and_repair_json(s2_out)
                 s2_actions = []
                 for a in (s2_json.get("actions") or []):
+                    if not isinstance(a, dict):
+                        continue
                     t = a.get("type")
                     if t not in STAGE2_ALLOWED:
                         continue
-                    if t == "create_instance" and str(a.get("parent") or "") != "Lighting":
+                    if t == "create_instance" and (str(a.get("parent") or "") != "Lighting" or a.get("class") not in STAGE2_INSTANCE_CLASSES):
                         continue
                     s2_actions.append(a)
+
+                # Güvenlik ağı: kullanıcı kamera istediyse ama model setup_camera üretmediyse otomatik ekle
+                p_low = (prompt_text or "").lower()
+                wants_cam = any(k in p_low for k in ["3. şahıs", "3.şahıs", "üçüncü şahıs", "third person", "3rd person", "tps", "omuz", "shoulder", "kamera takip", "follow cam"])
+                has_cam = any(a.get("type") in ("setup_camera", "create_cutscene") for a in s2_actions)
+                if wants_cam and not has_cam:
+                    s2_actions.append({"type": "setup_camera", "mode": "third_person", "distance": 11, "shoulder_offset": 2.2, "sprint": True})
+
                 combined_actions.extend(s2_actions)
                 if s2_json.get("thought"):
                     combined_thoughts.append("[2/3 Animasyon & Kamera] " + str(s2_json.get("thought")))
 
                 created_anims = [
-                    {"name": a.get("name"), "rig_path": a.get("rig_path"), "loop": a.get("loop", False)}
+                    {"name": a.get("name") or ("AI_" + str(a.get("preset"))), "preset": a.get("preset"), "rig_path": a.get("rig_path")}
                     for a in s2_actions if a.get("type") == "create_animation"
                 ]
+                camera_setup = next((a for a in s2_actions if a.get("type") == "setup_camera"), None)
                 stage_summaries.append({
                     "stage": "2_animations_and_camera",
                     "thought": s2_json.get("thought", ""),
-                    "created_animations_in_ReplicatedStorage_AI_Animations": created_anims,
-                    "actions_summary": [
-                        {"type": a.get("type"), "name": a.get("name"), "rig_path": a.get("rig_path"), "path": a.get("path")}
-                        for a in s2_actions
-                    ]
+                    "animations_in_ReplicatedStorage_AI_Animations": created_anims,
+                    "camera": summarize_actions([camera_setup])[0] if camera_setup else None,
+                    "actions_summary": summarize_actions(s2_actions)
                 })
 
-                # AŞAMA 3/3: SCRİPTLER & ÇALIŞMA ZAMANI KODLARI
-                anim_inject_line = ""
+                # AŞAMA 3/3: OYNANIŞ SCRİPTLERİ & UI
+                s3_notes = list(active_directives) + list(rig_type_hints)
                 if created_anims:
-                    anim_names = ", ".join([f"ReplicatedStorage.AI_Animations.{a['name']} (rig: {a.get('rig_path') or 'Workspace'})" for a in created_anims if a.get("name")])
-                    anim_inject_line = (
-                        f"\n- ZORUNLU AŞAMA 2 ANİMASYON LİSTESİ: Aşama 2'de şu animasyonlar üretildi: [{anim_names}]. "
-                        "Bunları mutlaka `KeyframeSequenceProvider:RegisterKeyframeSequence(keyframeSeq)` -> `Animation.AnimationId = hashId` -> `animator:LoadAnimation(anim):Play()` köprüsüyle oynat!"
-                    )
-                s3_base = mask_system_prompt_tools(base_sys, {"create_animation", "create_cutscene", "run_luau", "insert_asset", "terrain_fill", "set_camera"})
-                stage3_sys = s3_base + (
-                    "\n\n[AŞAMA 3/3 - TOOL MASKING: SADECE SCRİPTLER VE ÇALIŞMA ZAMANI LUAU KODLARI]:\n"
-                    "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `write_script`, `edit_script`, `delete_instance`, (ve sadece `RemoteEvent`/`RemoteFunction` için `create_instance`).\n"
-                    "- YASAKLI ARAÇLAR (BU AŞAMADA GİZLİ / SİLİNİR): `create_animation`, `create_cutscene`, `run_luau`.\n"
-                    "- `LocalScript`leri her zaman `StarterPlayer.StarterPlayerScripts` içine koy.\n"
-                    "- ZORUNLU RegisterKeyframeSequence ŞABLONU: Asla `animator:LoadAnimation(keyframeSequence)` çağırma. Her zaman `local id = game:GetService('KeyframeSequenceProvider'):RegisterKeyframeSequence(seq)` ile `Instance.new('Animation')` oluşturup `anim.AnimationId = id` yaptıktan sonra `LoadAnimation(anim)` kullan.\n"
-                    "- CreateHumanoidModelFromDescription RİGLERİ İÇİN YÜRÜME ANİMASYONU: Resmi fonksiyonla üretilen NPC'lerde varsayılan `Animate` scripti bulunmadığından, `create_animation` ile üretilen yürüme animasyonunu (`NPCWalk`) NPC hareket ederken (`Humanoid.Running`) mutlaka oynat.\n"
-                    "- REGISTERKEYFRAMESEQUENCE İSTEMCİ (CLIENT) KURALI: `KeyframeSequenceProvider:RegisterKeyframeSequence()` ile üretilen yerel hash ID'ler YALNIZCA istemci tarafında (`LocalScript`) görünür; sunucu `Script`inden oynatılan yerel animasyonlar istemcide görünmez! Bu nedenle `ReplicatedStorage.AI_Animations` içindeki TÜM animasyon oynatma (`RegisterKeyframeSequence` + `Animator:LoadAnimation`) işlemleri (NPC'ler dahil) HER ZAMAN `StarterPlayer.StarterPlayerScripts` altında bir `LocalScript` ile yapılmalıdır. Sunucu (`ServerScriptService`) `Script`i sadece karakterleri hareket ettirir (`Humanoid:MoveTo`) ve gerekirse `RemoteEvent` ile istemciye hangi aksiyonun oynatılacağını bildirir.\n"
-                    "- Eğer Aşama 2/3'te `create_cutscene` kullanılmadıysa ve kamera/aksiyon gerekiyorsa, dinamik FOV/POV geçişleri ve `Lighting.BlurEffect` / `DepthOfFieldEffect` animasyonları yapan temiz bir kamera `LocalScript`i yaz."
-                    + anim_inject_line
-                    + rig_hint_block
-                )
-                LIVE_STATE["status"] = f"{user['username']} | Aşama 3/3: Scriptler & Kodlar..."
+                    s3_notes.append("Animations available (play with AIKit.PlayAnim(model, name)): " + ", ".join(a["name"] for a in created_anims if a.get("name")))
+                if spawned_rigs:
+                    s3_notes.append("NPC rigs: " + ", ".join(r["path"] for r in spawned_rigs) + " — move them with Humanoid:MoveTo or AIKit.SetBehavior; animations are automatic.")
+                if camera_setup:
+                    s3_notes.append(f"Camera already handled by setup_camera (mode {camera_setup.get('mode')}). Do NOT write a camera script.")
+                stage3_sys = V6.build_stage_prompt(3, cfg["system_prompt"], mode_instruction, s3_notes)
+                LIVE_STATE["status"] = f"{user['username']} | Aşama 3/3: Oynanış Scriptleri & UI..."
                 s3_payload = {
-                    "KULLANICI_KOMUTU": payload.get("prompt", ""),
-                    "ACTIVE_QUALITY_DIRECTIVES": active_directives,
+                    "KULLANICI_KOMUTU": prompt_text,
+                    "OYUN_PLANI": V6.blueprint_for_stage(blueprint, 3),
                     "ONCEKI_ASAMALAR": stage_summaries,
                     "GECMIS_HAFIZA": memory_list,
-                    "SCENE_HIERARCHY": payload.get("scene_hierarchy", {}),
+                    "SCENE_HIERARCHY": scene_compact,
                     "SELECTED_ITEMS": payload.get("selected_items", []),
                     "PROJECT_INDEX": payload.get("project_shortened_index", []),
                     "REQUESTED_FILES_CONTENT": payload.get("requested_files_content", {})
                 }
                 s3_messages = [
                     {"role": "system", "content": stage3_sys},
-                    {"role": "user", "content": json.dumps(s3_payload, ensure_ascii=False)[:100000]}
+                    {"role": "user", "content": json.dumps(s3_payload, ensure_ascii=False)[:110000]}
                 ]
-                s3_out = await stream_venice_call(cfg, s3_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 3/3: Scriptler & Kodlar]")
+                s3_out = await stream_venice_call(cfg, s3_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 3/3: Oynanış Scriptleri & UI]")
                 total_out_tokens += estimate_tokens(s3_out)
                 s3_json = extract_and_repair_json(s3_out)
-                s3_actions = [a for a in (s3_json.get("actions") or []) if a.get("type") in STAGE3_ALLOWED]
-                combined_actions.extend(s3_actions)
-                if s3_json.get("thought"):
-                    combined_thoughts.append("[3/3 Kodlar] " + str(s3_json.get("thought")))
+                if s3_json.get("need_files") and not combined_actions:
+                    repaired_json = s3_json
+                else:
+                    s3_actions = []
+                    for a in (s3_json.get("actions") or []):
+                        if not isinstance(a, dict):
+                            continue
+                        t = a.get("type")
+                        if t == "fallback_code" and a.get("source"):
+                            a = {"type": "write_script", "script_type": "Script", "name": "AIGameplay", "parent": "ServerScriptService", "source": a["source"]}
+                            t = "write_script"
+                        if t in STAGE3_ALLOWED:
+                            s3_actions.append(a)
+                    combined_actions.extend(s3_actions)
+                    if s3_json.get("thought"):
+                        combined_thoughts.append("[3/3 Kodlar] " + str(s3_json.get("thought")))
 
-                repaired_json = {
-                    "thought": "\n".join(combined_thoughts) if combined_thoughts else "3 aşamalı üretim tamamlandı.",
-                    "actions": combined_actions
-                }
+                    # AIKit her zaman kurulu olsun (scriptler require ediyor)
+                    uses_kit = any("AIKit" in str(a.get("source", "")) for a in combined_actions)
+                    has_kit_action = any(a.get("type") in ("spawn_rig", "create_animation", "setup_camera") for a in combined_actions)
+                    if uses_kit and not has_kit_action:
+                        combined_actions.insert(0, {"type": "install_kit"})
+
+                    repaired_json = {
+                        "thought": "\n".join(combined_thoughts) if combined_thoughts else "3 aşamalı üretim tamamlandı.",
+                        "actions": combined_actions
+                    }
 
         if user["role"] != "admin":
             total_cost = int((raw_in_tokens * cfg["input_cost_mult"]) + (total_out_tokens * cfg["output_cost_mult"]))
