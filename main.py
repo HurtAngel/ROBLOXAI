@@ -23,7 +23,7 @@ ERROR_LOGS = []
 LIVE_STATE = {"status": "Boşta", "buffer": "", "model": "openai-gpt-oss-120b"}
 
 DEFAULT_UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "https://selected-chamois-177802.upstash.io").strip()
-DEFAULT_UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "").strip()
+DEFAULT_UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "gQAAAAAAAraKAAIgcDFhNjM1ZTZhZTIzYTc0NTQyOTMyY2Y2ZDg4Mzk0YTZmMw").strip()
 
 def get_upstash_creds() -> tuple[str, str]:
     url = os.environ.get("UPSTASH_REDIS_REST_URL", "").strip()
