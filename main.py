@@ -1598,6 +1598,8 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `write_script`, `edit_script`, `delete_instance`, (ve sadece `RemoteEvent`/`RemoteFunction` için `create_instance`).\n"
                     "- YASAKLI ARAÇLAR (BU AŞAMADA KULLANILAMAZ / SİLİNİR): `create_animation`, `create_cutscene`, `run_luau`.\n"
                     "- `LocalScript`leri her zaman `StarterPlayer.StarterPlayerScripts` içine koy.\n"
+                    "- ZORUNLU RegisterKeyframeSequence ŞABLONU: Asla `animator:LoadAnimation(keyframeSequence)` çağırma. Her zaman `local id = game:GetService('KeyframeSequenceProvider'):RegisterKeyframeSequence(seq)` ile `Instance.new('Animation')` oluşturup `anim.AnimationId = id` yaptıktan sonra `LoadAnimation(anim)` kullan.\n"
+                    "- CreateHumanoidModelFromDescription RİGLERİ İÇİN YÜRÜME ANİMASYONU: Resmi fonksiyonla üretilen NPC'lerde varsayılan `Animate` scripti bulunmadığından, `create_animation` ile üretilen yürüme animasyonunu (`NPCWalk`) NPC hareket ederken (`Humanoid.Running`) mutlaka oynat.\n"
                     "- Animasyon `Workspace` içindeki bir NPC üzerinde oynayacaksa `LocalScript` yerine MUTLAKA `ServerScriptService` içinde Sunucu `Script`i ile oynat.\n"
                     "- Eğer Aşama 2/3'te `create_cutscene` kullanılmadıysa ve kamera/aksiyon gerekiyorsa, dinamik FOV/POV geçişleri ve `Lighting.BlurEffect` / `DepthOfFieldEffect` animasyonları yapan temiz bir kamera `LocalScript`i yaz."
                     + anim_inject_line
