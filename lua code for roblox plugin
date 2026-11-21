@@ -18,13 +18,39 @@ local TextService = game:GetService("TextService")
 
 local DEFAULT_URL = "https://robloxai-1ea7.onrender.com"
 
+if not plugin then
+	warn("[AI Studio V4] Bu script Roblox Studio Plugin olarak çalıştırılmalıdır (Save as Local Plugin).")
+	return
+end
+
+local RunService = game:GetService("RunService")
+if RunService:IsRunning() and not RunService:IsEdit() then
+	return
+end
+
 local toolbar = plugin:CreateToolbar("AI Studio V4")
 local toggleBtn = toolbar:CreateButton("AI Architect V4", "Otonom Oyun, 3D Toolbox, UI ve Rig Animasyon Mimarı", "rbxassetid://15088716335")
+toggleBtn.ClickableWhenViewportHidden = true
 
-local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, true, true, 430, 760, 360, 520)
-local widget = plugin:CreateDockWidgetPluginGui("AIStudioV4Widget", widgetInfo)
+local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, true, false, 430, 720, 300, 360)
+local widget = plugin:CreateDockWidgetPluginGui("AIStudioV4_MainPanel", widgetInfo)
 widget.Title = "AI Studio V4"
+widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 widget.Enabled = true
+
+local function syncToggleButton()
+	pcall(function()
+		toggleBtn:SetActive(widget.Enabled)
+	end)
+end
+
+toggleBtn.Click:Connect(function()
+	widget.Enabled = not widget.Enabled
+	syncToggleButton()
+end)
+
+widget:GetPropertyChangedSignal("Enabled"):Connect(syncToggleButton)
+syncToggleButton()
 
 local C = {
 	BG = Color3.fromRGB(12, 12, 15),
@@ -96,7 +122,12 @@ authRow.Parent = root
 local keyInput = Instance.new("TextBox")
 keyInput.Size = UDim2.new(0.70, 0, 1, 0)
 keyInput.BackgroundColor3 = C.INPUT
-keyInput.Text = plugin:GetSetting("V3_ClientKey") or ""
+local savedKey = ""
+pcall(function()
+	local v = plugin:GetSetting("V3_ClientKey")
+	if v ~= nil then savedKey = tostring(v) end
+end)
+keyInput.Text = savedKey
 keyInput.PlaceholderText = "Client API Key yapıştırın..."
 keyInput.TextColor3 = C.TEXT
 keyInput.PlaceholderColor3 = C.MUTED
@@ -123,7 +154,7 @@ accountBadge.Size = UDim2.new(1, 0, 0, 26)
 accountBadge.BackgroundColor3 = C.CARD
 accountBadge.Text = "  Hesap: Doğrulanmadı"
 accountBadge.TextColor3 = C.MUTED
-accountBadge.Font = Enum.Font.GothamSemibold
+accountBadge.Font = Enum.Font.GothamMedium
 accountBadge.TextSize = 11
 accountBadge.TextXAlignment = Enum.TextXAlignment.Left
 accountBadge.Parent = root
@@ -191,7 +222,7 @@ local function makeRuleCheckbox(key, labelTxt)
 	local b = Instance.new("TextButton")
 	b.Size = UDim2.new(1, 0, 0, 23)
 	b.BackgroundTransparency = 1
-	b.Font = Enum.Font.GothamSemibold
+	b.Font = Enum.Font.GothamMedium
 	b.TextSize = 11
 	b.TextXAlignment = Enum.TextXAlignment.Left
 	b.Parent = rulesPanel
@@ -239,7 +270,7 @@ checkBtn.Size = UDim2.new(0.62, 0, 1, 0)
 checkBtn.BackgroundColor3 = C.CARD
 checkBtn.Text = "  ☑ Proje Özetlerini Oku"
 checkBtn.TextColor3 = C.GREEN
-checkBtn.Font = Enum.Font.GothamSemibold
+checkBtn.Font = Enum.Font.GothamMedium
 checkBtn.TextSize = 11
 checkBtn.TextXAlignment = Enum.TextXAlignment.Left
 checkBtn.Parent = indexRow
@@ -268,7 +299,7 @@ fixErrBtn.Size = UDim2.new(1, 0, 0, 28)
 fixErrBtn.BackgroundColor3 = C.CARD
 fixErrBtn.Text = "Output Hatalarını AI'ya Gönder ve Düzelt (0 Hata)"
 fixErrBtn.TextColor3 = C.MUTED
-fixErrBtn.Font = Enum.Font.GothamSemibold
+fixErrBtn.Font = Enum.Font.GothamMedium
 fixErrBtn.TextSize = 11
 fixErrBtn.Parent = root
 styleBox(fixErrBtn)
@@ -349,8 +380,10 @@ local function updatePromptScrollSize()
 	local txt = promptBox.Text or ""
 	charCountLabel.Text = tostring(#txt) .. " karakter"
 	local availW = math.max(200, promptScroll.AbsoluteSize.X - 28)
-	local bounds = TextService:GetTextSize(txt, promptBox.TextSize, promptBox.Font, Vector2.new(availW, 100000))
-	local targetH = math.max(180, bounds.Y + 36)
+	local ok, bounds = pcall(function()
+		return TextService:GetTextSize(txt, promptBox.TextSize, promptBox.Font, Vector2.new(availW, 100000))
+	end)
+	local targetH = math.max(180, (ok and bounds and bounds.Y or 0) + 36)
 	promptBox.Size = UDim2.new(1, -10, 0, targetH)
 	promptScroll.CanvasSize = UDim2.new(0, 0, 0, targetH)
 end
@@ -460,10 +493,6 @@ lPad.PaddingTop = UDim.new(0, 8)
 lPad.PaddingLeft = UDim.new(0, 8)
 lPad.PaddingRight = UDim.new(0, 8)
 lPad.Parent = logBox
-
-toggleBtn.Click:Connect(function()
-	widget.Enabled = not widget.Enabled
-end)
 
 Selection.SelectionChanged:Connect(function()
 	selectionBadge.Text = "Seçili Nesne: " .. tostring(#Selection:Get())
