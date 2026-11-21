@@ -1748,11 +1748,11 @@ end
 local function setupDefaultAtmosphere()
 	local lighting = game:GetService("Lighting")
 	pcall(function()
-		lighting.ClockTime = 14.8
+		lighting.ClockTime = 16.2
 		lighting.GeographicLatitude = 41.7
 		lighting.Brightness = 2.6
 		lighting.GlobalShadows = true
-		lighting.ShadowSoftness = 0.35
+		lighting.ShadowSoftness = 0.25
 		lighting.OutdoorAmbient = Color3.fromRGB(128, 132, 142)
 		lighting.Ambient = Color3.fromRGB(70, 74, 84)
 		lighting.ColorShift_Top = Color3.fromRGB(255, 244, 224)
