@@ -1245,17 +1245,18 @@ function AIKit.StartClient()
 			hum.WalkSpeed = sprinting and sprintSpeed or walkSpeed
 		end
 
-		-- Harekete duyarlı FOV
+		-- Evrensel harekete duyarlı dinamik FOV (yürüme + koşu + hızlanmada yumuşak açılır, durunca normale döner)
 		local speed = 0
 		if root then
 			local v = root.AssemblyLinearVelocity
 			speed = Vector3.new(v.X, 0, v.Z).Magnitude
 		end
-		local targetFov = baseFov + math.clamp((speed - 16) / 12, 0, 1) * (sprintFov - baseFov)
+		local speedFactor = (speed > 0.6) and math.clamp(speed / 26, 0, 1.25) or 0
+		local targetFov = baseFov + speedFactor * (sprintFov - baseFov)
 		curFov = curFov or cam.FieldOfView
-		curFov = curFov + (targetFov - curFov) * math.min(1, dt * 6)
+		curFov = curFov + (targetFov - curFov) * math.min(1, dt * 5.5)
 		fovKick = fovKick + (0 - fovKick) * math.min(1, dt * 8)
-		if mode ~= "default" then
+		if mode ~= "cutscene" then
 			cam.FieldOfView = math.clamp(curFov + fovKick, 20, 110)
 		end
 
@@ -1743,6 +1744,57 @@ local function setupCamera(act)
 	return mode
 end
 
+-- setup_atmosphere: Varsayılan sinematik gün ışığı atmosferi (özel hava/gece istenmediğinde otomatik kurulur)
+local function setupDefaultAtmosphere()
+	local lighting = game:GetService("Lighting")
+	pcall(function()
+		lighting.ClockTime = 14.8
+		lighting.GeographicLatitude = 41.7
+		lighting.Brightness = 2.6
+		lighting.GlobalShadows = true
+		lighting.ShadowSoftness = 0.35
+		lighting.OutdoorAmbient = Color3.fromRGB(128, 132, 142)
+		lighting.Ambient = Color3.fromRGB(70, 74, 84)
+		lighting.ColorShift_Top = Color3.fromRGB(255, 244, 224)
+		lighting.EnvironmentDiffuseScale = 0.7
+		lighting.EnvironmentSpecularScale = 0.8
+	end)
+
+	local atmo = lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
+	atmo.Name = "AI_CinematicAtmosphere"
+	atmo.Density = 0.28
+	atmo.Offset = 0.15
+	atmo.Color = Color3.fromRGB(215, 226, 240)
+	atmo.Decay = Color3.fromRGB(160, 178, 200)
+	atmo.Glare = 0.15
+	atmo.Haze = 1.4
+	atmo.Parent = lighting
+
+	local rays = lighting:FindFirstChild("AI_CinematicSunRays") or lighting:FindFirstChildOfClass("SunRaysEffect") or Instance.new("SunRaysEffect")
+	rays.Name = "AI_CinematicSunRays"
+	rays.Intensity = 0.08
+	rays.Spread = 0.65
+	rays.Enabled = true
+	rays.Parent = lighting
+
+	local cc = lighting:FindFirstChild("AI_CinematicColorCorrection") or lighting:FindFirstChildOfClass("ColorCorrectionEffect") or Instance.new("ColorCorrectionEffect")
+	cc.Name = "AI_CinematicColorCorrection"
+	cc.Saturation = 0.16
+	cc.Contrast = 0.08
+	cc.Brightness = 0.03
+	cc.TintColor = Color3.fromRGB(255, 250, 242)
+	cc.Enabled = true
+	cc.Parent = lighting
+
+	local bloom = lighting:FindFirstChild("AI_CinematicBloom") or lighting:FindFirstChildOfClass("BloomEffect") or Instance.new("BloomEffect")
+	bloom.Name = "AI_CinematicBloom"
+	bloom.Intensity = 0.25
+	bloom.Size = 18
+	bloom.Threshold = 1.6
+	bloom.Enabled = true
+	bloom.Parent = lighting
+end
+
 local function getDirectorPlayerSource()
 	return table.concat({
 		'local RunService = game:GetService("RunService")',
@@ -1980,11 +2032,15 @@ local function executeActions(actions)
 
 			elseif t == "install_kit" then
 				ensureKit()
-				table.insert(logs, "🧰 AIKit kuruldu: ReplicatedStorage.AIKit")
+				table.insert(logs, "🧰 AIKit kuruldu: ReplicatedStorage.AIKit (evrensel dinamik kamera & FOV)")
+
+			elseif t == "setup_atmosphere" then
+				setupDefaultAtmosphere()
+				table.insert(logs, "☀️ Varsayılan Sinematik Atmosfer kuruldu (sıcak gün ışığı, Atmosphere, SunRays, ColorCorrection)")
 
 			elseif t == "create_cutscene" then
 				local kitMod = ReplicatedStorage:FindFirstChild("AIKit")
-				if kitMod then kitMod:SetAttribute("CameraMode", "default") end
+				if kitMod then kitMod:SetAttribute("CameraMode", "cutscene") end
 				local spsDir = StarterPlayer:FindFirstChild("StarterPlayerScripts")
 				local dirLs = spsDir and spsDir:FindFirstChild("AI_DirectorCameraPlayer")
 				if dirLs and dirLs:IsA("LocalScript") then dirLs.Disabled = false end
