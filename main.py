@@ -1331,6 +1331,19 @@ async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_m
     collected = []
     reasoning_collected = []
     prefix = f"{stage_prefix}\n" if stage_prefix else ""
+    prior_live = (LIVE_STATE.get("buffer") or "").strip()
+    stage_header = (prior_live + "\n\n" + ("=" * 48) + "\n") if prior_live else ""
+
+    def build_stage_full_text() -> str:
+        parts = []
+        if stage_prefix:
+            parts.append(stage_prefix)
+        if reasoning_collected:
+            parts.append("[GİZLİ DÜŞÜNCE / REASONING]:\n" + "".join(reasoning_collected))
+        if collected:
+            parts.append("[AÇIK ÇIKTI / OUTPUT]:\n" + "".join(collected))
+        return "\n\n".join(parts)
+
     async with httpx.AsyncClient() as client:
         for idx, venice_payload in enumerate(candidate_payloads):
             async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
@@ -1352,17 +1365,21 @@ async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_m
                         chunk = json.loads(data_str)
                         delta = chunk["choices"][0].get("delta", {})
                         content = delta.get("content") or ""
-                        reasoning_piece = delta.get("reasoning_content") or ""
+                        reasoning_piece = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
+                        updated = False
+                        if reasoning_piece:
+                            reasoning_collected.append(reasoning_piece)
+                            updated = True
                         if content:
                             collected.append(content)
-                            buf = prefix + "".join(collected)[-2500:]
-                            TASKS[task_id]["buffer"] = buf
-                            LIVE_STATE["buffer"] = buf
-                        elif reasoning_piece and not collected:
-                            reasoning_collected.append(reasoning_piece)
-                            rbuf = prefix + "[Düşünüyor...] " + "".join(reasoning_collected)[-1500:]
-                            TASKS[task_id]["buffer"] = rbuf
-                            LIVE_STATE["buffer"] = rbuf
+                            updated = True
+                        if updated:
+                            full_stage = build_stage_full_text()
+                            LIVE_STATE["buffer"] = (stage_header + full_stage)[-200000:]
+                            if collected:
+                                TASKS[task_id]["buffer"] = prefix + "".join(collected)[-2500:]
+                            else:
+                                TASKS[task_id]["buffer"] = prefix + "[Düşünüyor...] " + "".join(reasoning_collected)[-1500:]
                     except Exception:
                         pass
                 break
