@@ -424,6 +424,7 @@ async def search_roblox_toolbox(keyword: str, limit: int = 6) -> list:
                                 "up_votes": voting.get("upVotes", 0),
                                 "down_votes": voting.get("downVotes", 0)
                             })
+                        results.sort(key=lambda x: (x.get("up_votes", 0) - x.get("down_votes", 0)), reverse=True)
                         return results
                     else:
                         return [{"asset_id": int(i), "name": f"{keyword} Model #{idx+1}"} for idx, i in enumerate(ids)]
@@ -1990,9 +1991,16 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                         extra_notes.append("WORLD_MANIFEST ANİMASYONLARI (birebir aynı isimle AIKit.PlayAnim kullan): " + ", ".join(anim_names))
                     extra_notes.append("TÜM istemci arayüzü (StartMenuGui, GameHUD, PlayerGuideUI), tuşlar ve kamera-güvenli FOV TEK BİR `StarterPlayer.StarterPlayerScripts.ClientGameCore` LocalScript'i içinde olmalıdır. Başlangıçta PlayerGui'deki eski kopyaları Destroy() ile temizle.")
                 elif aid == "layer_server_core":
-                    rem_names = [x.get("name") if isinstance(x, dict) else str(x) for x in client_manifest.get("remotes", [])]
-                    if rem_names:
-                        extra_notes.append("CLIENT_MANIFEST REMOTEEVENT İSİMLERİ (birebir aynı isimle dinle): " + ", ".join(rem_names))
+                    rem_desc = []
+                    for x in client_manifest.get("remotes", []):
+                        if isinstance(x, dict):
+                            nm = x.get("name") or ""
+                            args = x.get("args")
+                            rem_desc.append(f"{nm}({', '.join(map(str, args))})" if isinstance(args, list) and args else nm)
+                        else:
+                            rem_desc.append(str(x))
+                    if rem_desc:
+                        extra_notes.append("CLIENT_MANIFEST REMOTEEVENT SÖZLEŞMESİ (birebir aynı isim ve parametre sırasıyla dinle): " + ", ".join(rem_desc))
                     extra_notes.append("TÜM sunucu fiziği, skor/süre ve oyun döngüsü TEK BİR `ServerScriptService.ServerGameCore` Script'i içinde olmalıdır.")
 
                 sync_live(f"{meta['title']} çalışıyor ({a_model})...")
