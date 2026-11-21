@@ -1005,9 +1005,35 @@ local function executeActions(actions)
 					table.insert(logs, "* Düzenlendi: " .. target.Name)
 				end
 
-			elseif t == "delete_instance" then
-				local target = resolveOrSearchPath(act.path)
-				if target then target:Destroy() table.insert(logs, "- Silindi: " .. act.path) end
+			elseif t == "delete_instance" and act.path and act.path ~= "" then
+				local deletedCount = 0
+				local parts = string.split(act.path, ".")
+				local targetName = parts[#parts]
+				if #parts >= 2 then
+					local parentPath = table.concat(parts, ".", 1, #parts - 1)
+					local parentObj = resolveOrSearchPath(parentPath)
+					if parentObj then
+						for _, ch in ipairs(parentObj:GetChildren()) do
+							if ch.Name == targetName then
+								ch:Destroy()
+								deletedCount = deletedCount + 1
+							end
+						end
+					end
+				end
+				if deletedCount == 0 then
+					for _, srv in ipairs(SEARCH_SERVICES) do
+						for _, d in ipairs(srv:GetDescendants()) do
+							if d.Name == targetName then
+								pcall(function() d:Destroy() end)
+								deletedCount = deletedCount + 1
+							end
+						end
+					end
+				end
+				if deletedCount > 0 then
+					table.insert(logs, string.format("- Silindi: %s (%d kopya)", act.path, deletedCount))
+				end
 
 			elseif t == "write_script" or t == "edit_script" then
 				local sType = act.script_type or "Script"
