@@ -772,7 +772,7 @@ local function findTargetRig(rigPath)
 end
 
 local function buildKeyframeSequence(act)
-	local folder = ServerStorage:FindFirstChild("AI_Animations") or Instance.new("Folder", ServerStorage)
+	local folder = ReplicatedStorage:FindFirstChild("AI_Animations") or Instance.new("Folder", ReplicatedStorage)
 	folder.Name = "AI_Animations"
 	local targetRig = findTargetRig(act.rig_path)
 	local parentMap = {}
