@@ -68,8 +68,8 @@ STAGE2_PROMPT = (
     "    Available presets (smooth, tested, R6 and R15 automatically): idle, walk, run, jump, kick, shoot, throw, swing, slash, jab, punch, block, guard, wave, sit, dance, celebrate, cheer.\n"
     "    ALWAYS prefer a preset. Only for something no preset covers, give custom \"keyframes\":[{\"time\":0,\"poses\":{\"RightUpperArm\":{\"rot\":[x,y,z]}}}] using the rig's exact joint names.\n"
     "    For animations the PLAYER performs, omit rig_path (R15 player avatar). Walk/run/idle for spawn_rig NPCs already exist — do NOT recreate them.\n"
-    "- {\"type\":\"setup_camera\",\"mode\":\"third_person|follow|first_person|top_down|isometric|side_scroller|broadcast\",\"distance\":11,\"shoulder_offset\":2.2,\"fov\":70,\"sprint_fov\":84,\"lock_mouse\":false,\"sprint\":true,\"walk_speed\":16,\"sprint_speed\":26,\"target_path\":\"Workspace.Ball\"}\n"
-    "    third_person = over-the-shoulder action camera (lock_mouse true = shooter style). broadcast = TV sports camera following target_path (field long axis along X).\n"
+    "- {\"type\":\"setup_camera\",\"mode\":\"third_person|follow|first_person|top_down|isometric|side_scroller|broadcast\",\"distance\":11,\"shoulder_offset\":0,\"fov\":70,\"sprint_fov\":84,\"lock_mouse\":false,\"sprint\":true,\"walk_speed\":16,\"sprint_speed\":26,\"target_path\":\"Workspace.Ball\"}\n"
+    "    third_person = centered 3rd-person action camera by default (`shoulder_offset: 0`). Only set a positive `shoulder_offset` (e.g. `2.0`) when the user explicitly requests an over-the-shoulder / shooter camera. broadcast = TV sports camera following target_path (field long axis along X).\n"
     "    If the user asks for 3rd person / moving / dynamic camera, you MUST use setup_camera (never write a camera script).\n"
     "RULES:\n"
     "- ONLY emit `create_animation` and `setup_camera` actions in this stage (never `create_instance` or `spawn_rig`).\n"
@@ -120,6 +120,33 @@ _BUILD_WORDS = (
 )
 
 
+EXPANDER_PROMPT = (
+    "Sen deneyimli bir Roblox Oyun Tasarım Mimarı ve Teknik Spesifikasyon Yazarısın.\n"
+    "Görevin: Kullanıcının 1-2 cümlelik kısa veya genel oyun fikrini alıp, otonom bir Roblox üretim hattının (Aşama 0-1-2-3) "
+    "hatasız biçimde inşa edebileceği net, somut, teknik ve eksiksiz bir oyun tasarım spesifikasyonuna dönüştürmektir.\n"
+    "KRİTİK KURALLAR:\n"
+    "- ASLA JSON şeması, kod bloğu veya Luau kodu yazma! Yalnızca düz, okunaklı, maddeli teknik tasarım metni üret.\n"
+    "- Kullanıcının yazdığı dilde (Türkçe ise Türkçe, İngilizce ise İngilizce) yanıt ver.\n"
+    "- Kullanıcının isteğine sadık kal; istenmeyen alakasız mekanikler uydurma ama eksik kalan tüm sahne, etkileşim ve sınır detaylarını oyunun doğasına uygun biçimde somutlaştır.\n"
+    "- Çıktını MUTLAKA aşağıdaki 4 zorunlu başlık altında yapılandır:\n\n"
+    "1. Çevre ve Dünya İnşası:\n"
+    "- Zemin malzemesi, renk paleti, ölçek ve harita sınırları (duvar, çit, doğal sınır veya görünmez engel).\n"
+    "- Sahnenin boş kalmaması için en az 15-20 adet çevresel obje ve dekorun (yapılar, ışık kaynakları, zemin detayları, tema nesneleri) yaklaşık konum ve boyutlarıyla yerleşim planı.\n"
+    "- Sahneye uygun aydınlatma, gün saati ve atmosfer tarifi.\n\n"
+    "2. Varlıklar ve Davranışlar:\n"
+    "- Sahnedeki tüm NPC'lerin, rakiplerin veya etkileşimli nesnelerin rolleri, başlangıç konumları ve hareket mantıkları (devriye, takip, bölge kısıtlı koruma veya sabit).\n"
+    "- Etkileşimli her nesne için etkileşim mesafesi, tuşu (ProximityPrompt) ve fiziksel görünümü (taşınabilir eşyalar için görünür Tool veya uzva bağlı Model).\n\n"
+    "3. Mekanik Sınır Kuralları (Edge-Case Koruması):\n"
+    "- Kaynak tükendiğinde ilgili eylemin zorunlu durması (ör. enerji/stamina/cephane/süre sıfırlandığında hızlanma veya aksiyonun anında kesilmesi ve yenilenme koşulu).\n"
+    "- Taşınabilir eşyaların yalnızca karakterin elinde tutulduğunda (Equipped) tuşla çalışması; elde değilken veya bekleme süresindeyken (cooldown) tetiklenmemesi.\n"
+    "- Fiziksel erişilebilirlik sınırları (platform aralıkları, zıplama yükseklikleri, geçit genişlikleri) ve harita dışına/boşluğa düşme durumunda oyuncunun son güvenli noktaya veya başlangıca sıfırlanması.\n"
+    "- Oyun döngüsü (başlangıç, kazanma/kaybetme veya skor/ilerleme, yeniden başlatma) ve sunucu tarafı doğrulama kuralları.\n\n"
+    "4. Arayüz ve Görsel Geri Bildirim:\n"
+    "- Ekranı kapatmayan, çerçeveli ve okunaklı HUD öğeleri (skor, kaynak/durum barları, zamanlayıcı, tuş rehberi).\n"
+    "- Oyuncuyu yönlendiren anlık durum uyarıları, bildirimler ve etkileşim noktalarında belirgin görsel işaretler (parlama, ışık, ok/işaretçi veya efekt geri bildirimi)."
+)
+
+
 def is_legacy_prompt(sys_prompt: str) -> bool:
     sp = sys_prompt or ""
     return any(m in sp for m in LEGACY_PROMPT_MARKERS)
@@ -139,7 +166,7 @@ def needs_blueprint(prompt_text: str, payload: dict) -> bool:
         return False
     if payload.get("requested_files_content"):
         return False
-    if len(p) > 2500:
+    if len(p) > 8000:
         return False
     return any(w in p for w in _BUILD_WORDS)
 

@@ -1705,3 +1705,78 @@ async def poll_task(task_id: str, client_key: str = Header(None)):
     res = dict(TASKS[task_id])
     res["remaining_tokens"] = "Sınırsız" if user["role"] == "admin" else user["tokens"]
     return res
+
+EXPANDER_MODEL = os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
+
+@app.post("/expand-prompt")
+async def expand_prompt_endpoint(request: Request, client_key: str = Header(None)):
+    user = get_user_by_auth(client_key=client_key)
+    body = await request.json()
+    raw_prompt = str(body.get("prompt") or "").strip()
+    if not raw_prompt:
+        return JSONResponse({"error": "Boş prompt genişletilemez."}, status_code=400)
+
+    conn = get_db()
+    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
+    conn.close()
+
+    if not cfg.get("venice_key"):
+        return JSONResponse({"error": "Yönetici henüz Venice API anahtarını girmemiş."}, status_code=400)
+
+    headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
+    messages = [
+        {"role": "system", "content": V6.EXPANDER_PROMPT},
+        {"role": "user", "content": raw_prompt},
+    ]
+
+    primary_model = os.environ.get("EXPANDER_MODEL", EXPANDER_MODEL).strip() or "claude-haiku-5-5"
+    fallback_model = cfg.get("chat_model") or primary_model
+    models_to_try = [primary_model] if fallback_model == primary_model else [primary_model, fallback_model]
+
+    expanded_text = ""
+    used_model = primary_model
+    last_err = ""
+
+    LIVE_STATE["status"] = f"{user['username']} | Prompt Zenginleştirici çalışıyor..."
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for mdl in models_to_try:
+            payloads = [
+                {
+                    "model": mdl,
+                    "max_tokens": 2048,
+                    "messages": messages,
+                    "reasoning": {"enabled": False},
+                    "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+                },
+                {
+                    "model": mdl,
+                    "max_tokens": 2048,
+                    "messages": messages,
+                },
+            ]
+            for pld in payloads:
+                try:
+                    r = await client.post("https://api.venice.ai/api/v1/chat/completions", json=pld, headers=headers)
+                    if r.status_code == 200:
+                        data = r.json()
+                        msg = (data.get("choices") or [{}])[0].get("message") or {}
+                        content = str(msg.get("content") or "").strip()
+                        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                        if content:
+                            expanded_text = content
+                            used_model = mdl
+                            break
+                    else:
+                        last_err = f"HTTP {r.status_code}: {r.text[:200]}"
+                except Exception as exc:
+                    last_err = str(exc)
+            if expanded_text:
+                break
+
+    if not expanded_text:
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Expander Hatası", "details": last_err or "Boş yanıt"})
+        return JSONResponse({"error": f"Prompt zenginleştirilemedi: {last_err or 'Boş yanıt'}", "expanded_prompt": raw_prompt}, status_code=502)
+
+    LIVE_STATE["buffer"] = f"[✨ Prompt Zenginleştirici ({used_model})]\n{expanded_text}"
+    return {"expanded_prompt": expanded_text, "model": used_model}
+
