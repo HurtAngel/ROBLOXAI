@@ -771,33 +771,741 @@ local function findTargetRig(rigPath)
 	return nil
 end
 
-local function buildKeyframeSequence(act)
-	local folder = ReplicatedStorage:FindFirstChild("AI_Animations") or Instance.new("Folder", ReplicatedStorage)
-	folder.Name = "AI_Animations"
-	local targetRig = findTargetRig(act.rig_path)
-	local parentMap = {}
+-- ============================================================
+-- V6 AIKIT: Hazır, test edilmiş çalışma zamanı motorları
+-- ============================================================
+local CollectionService = game:GetService("CollectionService")
 
+local function L(f, o, b) return {f or 0, o or 0, b or 0} end
+
+local AIKIT_PRESETS = {
+	idle = {loop = true, priority = "Idle", frames = {
+		{t = 0, y = 0, ra = L(0, 4, 6), la = L(0, 4, 6)},
+		{t = 1.2, y = -0.06, lean = 2, head = 3, ra = L(2, 7, 10), la = L(2, 7, 10)},
+		{t = 2.4, y = 0, ra = L(0, 4, 6), la = L(0, 4, 6)},
+	}},
+	walk = {loop = true, priority = "Movement", frames = {
+		{t = 0, y = 0, twist = 4, rl = L(28, 0, 5), ll = L(-24, 0, 25), ra = L(-22, 5, 12), la = L(22, 5, 18)},
+		{t = 0.225, y = 0.12, rl = L(0, 0, 10), ll = L(5, 0, 55), ra = L(0, 5, 10), la = L(0, 5, 10)},
+		{t = 0.45, y = 0, twist = -4, rl = L(-24, 0, 25), ll = L(28, 0, 5), ra = L(22, 5, 18), la = L(-22, 5, 12)},
+		{t = 0.675, y = 0.12, rl = L(5, 0, 55), ll = L(0, 0, 10), ra = L(0, 5, 10), la = L(0, 5, 10)},
+		{t = 0.9, y = 0, twist = 4, rl = L(28, 0, 5), ll = L(-24, 0, 25), ra = L(-22, 5, 12), la = L(22, 5, 18)},
+	}},
+	run = {loop = true, priority = "Movement", frames = {
+		{t = 0, y = 0, lean = 12, twist = 8, rl = L(50, 0, 10), ll = L(-40, 0, 70), ra = L(-45, 8, 85), la = L(45, 8, 85)},
+		{t = 0.15, y = 0.25, lean = 12, rl = L(10, 0, 30), ll = L(10, 0, 100), ra = L(0, 8, 85), la = L(0, 8, 85)},
+		{t = 0.3, y = 0, lean = 12, twist = -8, rl = L(-40, 0, 70), ll = L(50, 0, 10), ra = L(45, 8, 85), la = L(-45, 8, 85)},
+		{t = 0.45, y = 0.25, lean = 12, rl = L(10, 0, 100), ll = L(10, 0, 30), ra = L(0, 8, 85), la = L(0, 8, 85)},
+		{t = 0.6, y = 0, lean = 12, twist = 8, rl = L(50, 0, 10), ll = L(-40, 0, 70), ra = L(-45, 8, 85), la = L(45, 8, 85)},
+	}},
+	jump = {loop = false, priority = "Action", frames = {
+		{t = 0},
+		{t = 0.15, y = -0.5, lean = 10, rl = L(30, 0, 60), ll = L(30, 0, 60), ra = L(-30, 10, 10), la = L(-30, 10, 10)},
+		{t = 0.35, y = 0.2, rl = L(-5, 0, 5), ll = L(-5, 0, 5), ra = L(160, 15, 10), la = L(160, 15, 10)},
+		{t = 0.7, rl = L(10, 0, 20), ll = L(10, 0, 20), ra = L(60, 15, 20), la = L(60, 15, 20)},
+	}},
+	wave = {loop = true, priority = "Action", frames = {
+		{t = 0, ra = L(0, 140, 30)},
+		{t = 0.25, ra = L(0, 165, 30), head = 4},
+		{t = 0.5, ra = L(0, 140, 30)},
+		{t = 0.75, ra = L(0, 165, 30), head = 4},
+		{t = 1.0, ra = L(0, 140, 30)},
+	}},
+	sit = {loop = true, priority = "Action", frames = {
+		{t = 0, y = -1.1, rl = L(90, 0, 90), ll = L(90, 0, 90), ra = L(30, 5, 40), la = L(30, 5, 40)},
+		{t = 1, y = -1.1, rl = L(90, 0, 90), ll = L(90, 0, 90), ra = L(30, 5, 40), la = L(30, 5, 40)},
+	}},
+	dance = {loop = true, priority = "Action", frames = {
+		{t = 0, y = 0, twist = 20, ra = L(0, 150, 20), la = L(0, 30, 60), rl = L(0, 0, 10), ll = L(0, 0, 30)},
+		{t = 0.4, y = -0.25, ra = L(60, 40, 90), la = L(60, 40, 90), rl = L(10, 0, 40), ll = L(10, 0, 40)},
+		{t = 0.8, y = 0, twist = -20, ra = L(0, 30, 60), la = L(0, 150, 20), rl = L(0, 0, 30), ll = L(0, 0, 10)},
+		{t = 1.2, y = -0.25, ra = L(60, 40, 90), la = L(60, 40, 90), rl = L(10, 0, 40), ll = L(10, 0, 40)},
+		{t = 1.6, y = 0, twist = 20, ra = L(0, 150, 20), la = L(0, 30, 60), rl = L(0, 0, 10), ll = L(0, 0, 30)},
+	}},
+	celebrate = {loop = true, priority = "Action", frames = {
+		{t = 0, ra = L(0, 160, 10), la = L(0, 160, 10)},
+		{t = 0.25, y = 0.3, head = -10, ra = L(10, 170, 30), la = L(10, 170, 30), rl = L(0, 0, 20), ll = L(0, 0, 20)},
+		{t = 0.5, ra = L(0, 160, 10), la = L(0, 160, 10)},
+	}},
+}
+
+-- Spor / aksiyon presetleri
+AIKIT_PRESETS.kick = {loop = false, priority = "Action", frames = {
+	{t = 0},
+	{t = 0.18, lean = -5, rl = L(-35, 0, 70), ra = L(-10, 25, 10), la = L(10, 25, 10)},
+	{t = 0.32, lean = -12, rl = L(85, 0, 0), ll = L(-5, 0, 10), ra = L(-30, 30, 20), la = L(40, 30, 20)},
+	{t = 0.7},
+}}
+AIKIT_PRESETS.throw = {loop = false, priority = "Action", frames = {
+	{t = 0},
+	{t = 0.25, twist = -20, lean = -5, ra = L(170, 20, 90), la = L(40, 10, 10)},
+	{t = 0.4, twist = 20, lean = 10, ra = L(80, 0, 0), la = L(-10, 10, 10), rl = L(-15, 0, 10), ll = L(20, 0, 10)},
+	{t = 0.75},
+}}
+AIKIT_PRESETS.swing = {loop = false, priority = "Action", frames = {
+	{t = 0},
+	{t = 0.18, twist = -25, ra = L(160, 40, 30), la = L(20, 10, 30)},
+	{t = 0.32, twist = 30, lean = 10, ra = L(30, -30, 0), la = L(-10, 15, 20), ll = L(20, 0, 15), rl = L(-15, 0, 10)},
+	{t = 0.6},
+}}
+AIKIT_PRESETS.jab = {loop = false, priority = "Action", frames = {
+	{t = 0, ra = L(70, 0, 100), la = L(70, 0, 100)},
+	{t = 0.12, twist = -20, ra = L(60, 10, 120), la = L(70, 0, 100)},
+	{t = 0.22, twist = 25, lean = 8, ra = L(90, 0, 0), la = L(60, 0, 110), rl = L(-10, 0, 10), ll = L(15, 0, 15)},
+	{t = 0.5, ra = L(70, 0, 100), la = L(70, 0, 100)},
+}}
+AIKIT_PRESETS.block = {loop = true, priority = "Action", frames = {
+	{t = 0, lean = 5, ra = L(80, 10, 110), la = L(80, 10, 110), rl = L(10, 0, 15), ll = L(-5, 0, 15)},
+	{t = 0.5, y = -0.05, lean = 6, ra = L(82, 10, 112), la = L(82, 10, 112), rl = L(10, 0, 18), ll = L(-5, 0, 18)},
+	{t = 1, lean = 5, ra = L(80, 10, 110), la = L(80, 10, 110), rl = L(10, 0, 15), ll = L(-5, 0, 15)},
+}}
+AIKIT_PRESETS.shoot = AIKIT_PRESETS.kick
+AIKIT_PRESETS.slash = AIKIT_PRESETS.swing
+AIKIT_PRESETS.attack = AIKIT_PRESETS.swing
+AIKIT_PRESETS.punch = AIKIT_PRESETS.jab
+AIKIT_PRESETS.cheer = AIKIT_PRESETS.celebrate
+AIKIT_PRESETS.guard = AIKIT_PRESETS.block
+
+-- Semantik kareyi (ileri/yana/bükme açıları) gerçek R15/R6 eklem pozlarına çevirir.
+local function presetFrameToPoses(fr, isR6, k)
+	k = k or 1
+	local z = {0, 0, 0}
+	local ra, la, rl, ll = fr.ra or z, fr.la or z, fr.rl or z, fr.ll or z
+	local y, lean, twist = (fr.y or 0), (fr.lean or 0) * k, (fr.twist or 0) * k
+	local head, headTurn = (fr.head or 0) * k, (fr.headTurn or 0) * k
+	local poses = {}
+	if isR6 then
+		poses["Torso"] = {pos = {0, 0, y}, rot = {lean, 0, twist}}
+		poses["Head"] = {rot = {head, 0, headTurn}}
+		poses["Right Arm"] = {rot = {-ra[2] * k, 0, ra[1] * k}}
+		poses["Left Arm"] = {rot = {-la[2] * k, 0, -la[1] * k}}
+		poses["Right Leg"] = {rot = {0, 0, rl[1] * k}}
+		poses["Left Leg"] = {rot = {0, 0, -ll[1] * k}}
+	else
+		poses["LowerTorso"] = {pos = {0, y, 0}, rot = {-lean, 0, 0}}
+		poses["UpperTorso"] = {rot = {0, twist, 0}}
+		poses["Head"] = {rot = {-head, headTurn, 0}}
+		poses["RightUpperArm"] = {rot = {ra[1] * k, 0, ra[2] * k}}
+		poses["LeftUpperArm"] = {rot = {la[1] * k, 0, -la[2] * k}}
+		poses["RightLowerArm"] = {rot = {ra[3] * k, 0, 0}}
+		poses["LeftLowerArm"] = {rot = {la[3] * k, 0, 0}}
+		poses["RightUpperLeg"] = {rot = {rl[1] * k, 0, 0}}
+		poses["LeftUpperLeg"] = {rot = {ll[1] * k, 0, 0}}
+		poses["RightLowerLeg"] = {rot = {-rl[3] * k, 0, 0}}
+		poses["LeftLowerLeg"] = {rot = {-ll[3] * k, 0, 0}}
+	end
+	return poses
+end
+
+local function buildPresetKeyframes(presetName, isR6, speed, intensity)
+	local preset = AIKIT_PRESETS[string.lower(tostring(presetName or ""))]
+	if not preset then return nil end
+	speed = tonumber(speed) or 1
+	if speed <= 0 then speed = 1 end
+	local out = {}
+	for _, fr in ipairs(preset.frames) do
+		table.insert(out, {time = (fr.t or 0) / speed, poses = presetFrameToPoses(fr, isR6, tonumber(intensity) or 1)})
+	end
+	return out, preset
+end
+
+local AIKIT_MODULE_SOURCE = [==[
+-- AIKit V6 (AI Studio eklentisi otomatik kurar ve her seferinde günceller; elle düzenleme)
+-- Hem Server hem Client'tan kullanılabilir:
+--   local AIKit = require(game.ReplicatedStorage:WaitForChild("AIKit"))
+--   AIKit.PlayAnim(modelOrPlayer, "AnimAdi", {speed = 1, looped = false})
+--   AIKit.StopAnim(modelOrPlayer, "AnimAdi")
+--   AIKit.GetAnimLength("AnimAdi")
+--   AIKit.Shake(guc, sure, [player])  AIKit.FovPunch(miktar, sure, [player])  AIKit.Blur(boyut, sure, [player])
+--   AIKit.SetBehavior(npcModel, "idle" | "wander" | "patrol" | "follow_player")   (server)
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
+
+local AIKit = {}
+local IS_SERVER = RunService:IsServer()
+local remote = script:WaitForChild("Remote", 10)
+
+local function resolve(target)
+	if typeof(target) == "Instance" then
+		if target:IsA("Player") then return target.Character end
+		return target
+	end
+	if type(target) == "string" then
+		if target == "LocalPlayer" and not IS_SERVER then return Players.LocalPlayer.Character end
+		local parts = string.split(target, ".")
+		local cur = game
+		local startIdx = 1
+		if parts[1] == "Workspace" or parts[1] == "workspace" then cur = workspace; startIdx = 2 end
+		for i = startIdx, #parts do
+			cur = cur and cur:FindFirstChild(parts[i])
+		end
+		if cur and cur ~= game then return cur end
+		return workspace:FindFirstChild(parts[#parts], true)
+	end
+	return nil
+end
+AIKit.Resolve = resolve
+
+local function fire(kind, player, ...)
+	if not remote then return end
+	if typeof(player) == "Instance" and player:IsA("Player") then
+		remote:FireClient(player, kind, ...)
+	else
+		remote:FireAllClients(kind, ...)
+	end
+end
+
+function AIKit.GetAnimLength(name)
+	local folder = ReplicatedStorage:FindFirstChild("AI_Animations")
+	local kfs = folder and folder:FindFirstChild(name)
+	if not kfs then return 0 end
+	local maxT = 0
+	for _, kf in ipairs(kfs:GetChildren()) do
+		if kf:IsA("Keyframe") and kf.Time > maxT then maxT = kf.Time end
+	end
+	return maxT
+end
+
+-- ---------- İstemci animasyon motoru ----------
+local animCache = {}
+local trackCache = setmetatable({}, {__mode = "k"})
+
+local function getAnimation(name)
+	if animCache[name] then return animCache[name] end
+	local folder = ReplicatedStorage:FindFirstChild("AI_Animations") or ReplicatedStorage:WaitForChild("AI_Animations", 5)
+	local src = folder and folder:FindFirstChild(name)
+	if not src then
+		warn("[AIKit] Animasyon bulunamadı: ReplicatedStorage.AI_Animations." .. tostring(name))
+		return nil
+	end
+	local anim = Instance.new("Animation")
+	anim.Name = name
+	local assetId = src:GetAttribute("AssetId")
+	if src:IsA("Animation") then
+		anim.AnimationId = src.AnimationId
+	elseif assetId and tostring(assetId) ~= "" and tostring(assetId) ~= "0" then
+		anim.AnimationId = "rbxassetid://" .. (string.gsub(tostring(assetId), "%D", ""))
+	elseif src:IsA("KeyframeSequence") then
+		local ok, id = pcall(function()
+			return game:GetService("KeyframeSequenceProvider"):RegisterKeyframeSequence(src)
+		end)
+		if not ok then
+			warn("[AIKit] RegisterKeyframeSequence hatası: " .. tostring(id))
+			return nil
+		end
+		anim.AnimationId = id
+	end
+	animCache[name] = anim
+	return anim
+end
+
+local function getAnimator(model)
+	if not model then return nil end
+	local holder = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
+	if not holder then return nil end
+	local animator = holder:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = holder
+	end
+	return animator
+end
+
+local function getTrack(model, name)
+	local tracks = trackCache[model]
+	if not tracks then tracks = {}; trackCache[model] = tracks end
+	if tracks[name] then return tracks[name] end
+	local animator = getAnimator(model)
+	local anim = animator and getAnimation(name)
+	if not anim then return nil end
+	local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
+	if ok and track then
+		tracks[name] = track
+		return track
+	end
+	return nil
+end
+
+function AIKit.PlayAnim(target, name, opts)
+	opts = opts or {}
+	if IS_SERVER then
+		fire("anim", nil, resolve(target) or target, name, opts)
+		return nil
+	end
+	local model = resolve(target)
+	if not model then return nil end
+	local track = getTrack(model, name)
+	if not track then return nil end
+	if opts.priority and Enum.AnimationPriority[opts.priority] then track.Priority = Enum.AnimationPriority[opts.priority] end
+	if opts.looped ~= nil then track.Looped = opts.looped end
+	track:Play(opts.fade or 0.12, opts.weight or 1, opts.speed or 1)
+	return track
+end
+
+function AIKit.StopAnim(target, name, fade)
+	if IS_SERVER then
+		fire("stopanim", nil, resolve(target) or target, name, fade)
+		return
+	end
+	local model = resolve(target)
+	local tracks = model and trackCache[model]
+	if not tracks then return end
+	if name and tracks[name] then
+		tracks[name]:Stop(fade or 0.15)
+	elseif not name then
+		for _, tr in pairs(tracks) do tr:Stop(fade or 0.15) end
+	end
+end
+
+-- ---------- Kamera efektleri ----------
+local shakeAmp, shakeUntil, fovKick = 0, 0, 0
+
+function AIKit.Shake(intensity, duration, player)
+	if IS_SERVER then fire("shake", player, intensity, duration) return end
+	shakeAmp = math.max(shakeAmp, tonumber(intensity) or 0.5)
+	shakeUntil = math.max(shakeUntil, os.clock() + (tonumber(duration) or 0.3))
+end
+
+function AIKit.FovPunch(amount, duration, player)
+	if IS_SERVER then fire("fov", player, amount, duration) return end
+	fovKick = tonumber(amount) or 12
+end
+
+function AIKit.Blur(size, duration, player)
+	if IS_SERVER then fire("blur", player, size, duration) return end
+	local blur = Lighting:FindFirstChild("AIKit_Blur")
+	if not blur then
+		blur = Instance.new("BlurEffect")
+		blur.Name = "AIKit_Blur"
+		blur.Size = 0
+		blur.Parent = Lighting
+	end
+	blur.Size = tonumber(size) or 16
+	TweenService:Create(blur, TweenInfo.new(tonumber(duration) or 0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = 0}):Play()
+end
+
+function AIKit.SetBehavior(model, behavior)
+	model = resolve(model)
+	if model then
+		model:SetAttribute("AI_Behavior", behavior)
+		if not CollectionService:HasTag(model, "AI_NPC") then CollectionService:AddTag(model, "AI_NPC") end
+	end
+end
+
+-- ---------- İstemci başlatıcı (StarterPlayerScripts.AI_ClientRuntime çağırır) ----------
+local started = false
+function AIKit.StartClient()
+	if IS_SERVER or started then return end
+	started = true
+	local player = Players.LocalPlayer
+
+	if remote then
+		remote.OnClientEvent:Connect(function(kind, a, b, c)
+			if kind == "anim" then AIKit.PlayAnim(a, b, c)
+			elseif kind == "stopanim" then AIKit.StopAnim(a, b, c)
+			elseif kind == "shake" then AIKit.Shake(a, b)
+			elseif kind == "fov" then AIKit.FovPunch(a, b)
+			elseif kind == "blur" then AIKit.Blur(a, b)
+			end
+		end)
+	end
+
+	-- NPC yürüme / koşma / bekleme animasyonları (pozisyon farkından hız ölçülür)
+	local loco = {}
+	local function addLoco(model)
+		if loco[model] or not model:IsA("Model") then return end
+		loco[model] = {current = nil, lastPos = nil, speed = 0}
+	end
+	for _, m in ipairs(CollectionService:GetTagged("AI_Locomotion")) do addLoco(m) end
+	CollectionService:GetInstanceAddedSignal("AI_Locomotion"):Connect(addLoco)
+	CollectionService:GetInstanceRemovedSignal("AI_Locomotion"):Connect(function(m) loco[m] = nil end)
+
+	RunService.Heartbeat:Connect(function(dt)
+		for model, st in pairs(loco) do
+			if not model.Parent then
+				loco[model] = nil
+				continue
+			end
+			local hum = model:FindFirstChildOfClass("Humanoid")
+			local root = model:FindFirstChild("HumanoidRootPart")
+			if not hum or not root then continue end
+			local pos = root.Position
+			if st.lastPos and dt > 0 then
+				local d = Vector3.new(pos.X - st.lastPos.X, 0, pos.Z - st.lastPos.Z).Magnitude / dt
+				st.speed = st.speed + (math.min(d, 60) - st.speed) * math.min(1, dt * 10)
+			end
+			st.lastPos = pos
+			local walkA, runA, idleA = model:GetAttribute("AI_WalkAnim"), model:GetAttribute("AI_RunAnim"), model:GetAttribute("AI_IdleAnim")
+			local want, rate = nil, 1
+			if hum.Health > 0 then
+				if st.speed > 0.8 then
+					if runA and st.speed > (model:GetAttribute("AI_RunThreshold") or 17) then
+						want, rate = runA, st.speed / 24
+					else
+						want, rate = walkA, st.speed / 12
+					end
+				else
+					want = idleA
+				end
+			end
+			if want ~= st.current then
+				if st.current then
+					local old = getTrack(model, st.current)
+					if old then old:Stop(0.2) end
+				end
+				st.current = want
+				if want then
+					local tr = getTrack(model, want)
+					if tr then
+						tr.Looped = true
+						tr.Priority = (want == idleA) and Enum.AnimationPriority.Idle or Enum.AnimationPriority.Movement
+						tr:Play(0.2)
+					end
+				end
+			end
+			if want and want ~= idleA then
+				local tr = getTrack(model, want)
+				if tr then tr:AdjustSpeed(math.clamp(rate, 0.5, 2.2)) end
+			end
+		end
+	end)
+
+	-- Koşu (Shift)
+	local sprinting = false
+	UserInputService.InputBegan:Connect(function(input, gp)
+		if gp then return end
+		if input.KeyCode == Enum.KeyCode.LeftShift and script:GetAttribute("SprintEnabled") then sprinting = true end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.KeyCode == Enum.KeyCode.LeftShift then sprinting = false end
+	end)
+
+	-- Kamera sistemi
+	local function applyZoom()
+		local mode = script:GetAttribute("CameraMode") or "default"
+		local dist = tonumber(script:GetAttribute("CamDistance")) or 10
+		if mode == "third_person" or mode == "follow" then
+			player.CameraMode = Enum.CameraMode.Classic
+			player.CameraMinZoomDistance = math.max(0.5, dist * 0.6)
+			player.CameraMaxZoomDistance = dist * 1.4
+		elseif mode == "first_person" then
+			player.CameraMode = Enum.CameraMode.LockFirstPerson
+		end
+	end
+	applyZoom()
+	script:GetAttributeChangedSignal("CameraMode"):Connect(applyZoom)
+	player.CharacterAdded:Connect(function() task.wait(0.1) applyZoom() end)
+
+	local curFov, smoothPos = nil, nil
+	RunService:BindToRenderStep("AIKitCamera", Enum.RenderPriority.Camera.Value + 1, function(dt)
+		local cam = workspace.CurrentCamera
+		if not cam then return end
+		local mode = script:GetAttribute("CameraMode") or "default"
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		local baseFov = tonumber(script:GetAttribute("CamFov")) or 70
+		local sprintFov = tonumber(script:GetAttribute("CamSprintFov")) or (baseFov + 12)
+		local dist = tonumber(script:GetAttribute("CamDistance")) or 10
+		local height = tonumber(script:GetAttribute("CamHeight")) or 2
+		local shoulder = tonumber(script:GetAttribute("CamShoulder")) or 2
+
+		if hum and script:GetAttribute("SprintEnabled") then
+			local walkSpeed = tonumber(script:GetAttribute("WalkSpeed")) or 16
+			local sprintSpeed = tonumber(script:GetAttribute("SprintSpeed")) or 26
+			hum.WalkSpeed = sprinting and sprintSpeed or walkSpeed
+		end
+
+		-- Harekete duyarlı FOV
+		local speed = 0
+		if root then
+			local v = root.AssemblyLinearVelocity
+			speed = Vector3.new(v.X, 0, v.Z).Magnitude
+		end
+		local targetFov = baseFov + math.clamp((speed - 16) / 12, 0, 1) * (sprintFov - baseFov)
+		curFov = curFov or cam.FieldOfView
+		curFov = curFov + (targetFov - curFov) * math.min(1, dt * 6)
+		fovKick = fovKick + (0 - fovKick) * math.min(1, dt * 8)
+		if mode ~= "default" then
+			cam.FieldOfView = math.clamp(curFov + fovKick, 20, 110)
+		end
+
+		if mode == "third_person" or mode == "follow" then
+			if cam.CameraType ~= Enum.CameraType.Custom then cam.CameraType = Enum.CameraType.Custom end
+			if hum then
+				local off = (mode == "third_person") and Vector3.new(shoulder, height * 0.25, 0) or Vector3.new(0, 0, 0)
+				hum.CameraOffset = hum.CameraOffset:Lerp(off, math.min(1, dt * 8))
+			end
+			if mode == "third_person" and script:GetAttribute("CamLockMouse") and hum and root and hum.Health > 0 then
+				UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+				hum.AutoRotate = false
+				local look = cam.CFrame.LookVector
+				local flat = Vector3.new(look.X, 0, look.Z)
+				if flat.Magnitude > 0.01 then
+					root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
+				end
+			elseif hum then
+				hum.AutoRotate = true
+			end
+		elseif mode == "top_down" or mode == "isometric" or mode == "side_scroller" or mode == "broadcast" then
+			local focus = root and root.Position or Vector3.new(0, 0, 0)
+			local tPath = script:GetAttribute("CamTarget")
+			if tPath and tPath ~= "" then
+				local tObj = resolve(tPath)
+				local tPos = nil
+				if tObj and tObj:IsA("BasePart") then tPos = tObj.Position
+				elseif tObj and tObj:IsA("Model") then tPos = tObj:GetPivot().Position end
+				if tPos then focus = (mode == "broadcast" and root) and tPos:Lerp(root.Position, 0.3) or tPos end
+			end
+			local desired
+			if mode == "top_down" then
+				desired = focus + Vector3.new(0, dist, dist * 0.35)
+			elseif mode == "isometric" then
+				desired = focus + Vector3.new(dist * 0.7, dist * 0.8, dist * 0.7)
+			elseif mode == "side_scroller" then
+				desired = focus + Vector3.new(0, height, dist)
+			else
+				desired = Vector3.new(focus.X, focus.Y + height, focus.Z + dist)
+			end
+			smoothPos = smoothPos and smoothPos:Lerp(desired, math.min(1, dt * 5)) or desired
+			cam.CameraType = Enum.CameraType.Scriptable
+			local lookAt = (mode == "side_scroller") and Vector3.new(smoothPos.X, focus.Y + height * 0.3, focus.Z) or focus
+			cam.CFrame = CFrame.lookAt(smoothPos, lookAt)
+		end
+
+		-- Sarsıntı (tüm modlarda en son uygulanır)
+		local now = os.clock()
+		if now < shakeUntil and shakeAmp > 0 then
+			local amp = shakeAmp * math.clamp((shakeUntil - now) * 3, 0, 1)
+			local c = now * 25
+			cam.CFrame = cam.CFrame * CFrame.Angles(
+				math.rad(math.noise(c, 0.3) * amp * 4),
+				math.rad(math.noise(c, 1.7) * amp * 4),
+				math.rad(math.noise(c, 3.1) * amp * 2)
+			)
+		else
+			shakeAmp = 0
+		end
+	end)
+end
+
+
+return AIKit
+]==]
+local AIKIT_NPC_BRAIN_SOURCE = [==[
+-- AI Studio V6: Sunucu NPC beyni. "AI_NPC" etiketli modelleri AI_Behavior attribute'una göre yürütür.
+-- Davranışlar: idle | wander | patrol | follow_player | follow_target
+-- Attribute'lar: AI_WanderRadius, AI_Patrol (JSON [[x,y,z],...]), AI_SightRange, AI_FollowDistance, AI_TargetPath
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
+local brains = {}
+
+local function nearestCharacter(pos, maxDist)
+	local best, bestD = nil, maxDist
+	for _, plr in ipairs(Players:GetPlayers()) do
+		local char = plr.Character
+		local r = char and char:FindFirstChild("HumanoidRootPart")
+		local h = char and char:FindFirstChildOfClass("Humanoid")
+		if r and h and h.Health > 0 then
+			local d = (r.Position - pos).Magnitude
+			if d < bestD then best, bestD = char, d end
+		end
+	end
+	return best
+end
+
+local function resolvePath(pathStr)
+	if not pathStr or pathStr == "" then return nil end
+	local parts = string.split(pathStr, ".")
+	local cur = game
+	local startIdx = 1
+	if parts[1] == "Workspace" or parts[1] == "workspace" then cur = workspace; startIdx = 2 end
+	for i = startIdx, #parts do cur = cur and cur:FindFirstChild(parts[i]) end
+	if cur and cur ~= game then return cur end
+	return workspace:FindFirstChild(parts[#parts], true)
+end
+
+local function step(model, hum, root, state)
+	local behavior = model:GetAttribute("AI_Behavior") or "idle"
+	if behavior == "wander" then
+		local r = math.max(4, math.floor(model:GetAttribute("AI_WanderRadius") or 25))
+		hum:MoveTo(state.home + Vector3.new(math.random(-r, r), 0, math.random(-r, r)))
+		hum.MoveToFinished:Wait()
+		task.wait(math.random(8, 25) / 10)
+	elseif behavior == "patrol" then
+		local okJ, pts = pcall(function() return HttpService:JSONDecode(model:GetAttribute("AI_Patrol") or "[]") end)
+		if okJ and type(pts) == "table" and #pts > 0 then
+			local p = pts[(state.patrolIndex - 1) % #pts + 1]
+			state.patrolIndex += 1
+			hum:MoveTo(Vector3.new(p[1] or 0, p[2] or 0, p[3] or 0))
+			hum.MoveToFinished:Wait()
+			task.wait(0.4)
+		else
+			task.wait(1)
+		end
+	elseif behavior == "follow_player" or behavior == "follow_target" then
+		local targetPos = nil
+		if behavior == "follow_target" then
+			local obj = resolvePath(model:GetAttribute("AI_TargetPath"))
+			if obj and obj:IsA("BasePart") then targetPos = obj.Position
+			elseif obj and obj:IsA("Model") then targetPos = obj:GetPivot().Position end
+		else
+			local char = nearestCharacter(root.Position, model:GetAttribute("AI_SightRange") or 80)
+			if char then targetPos = char.HumanoidRootPart.Position end
+		end
+		if targetPos then
+			local stopDist = model:GetAttribute("AI_FollowDistance") or 5
+			if (targetPos - root.Position).Magnitude > stopDist then
+				hum:MoveTo(targetPos)
+			else
+				hum:MoveTo(root.Position)
+			end
+		else
+			hum:MoveTo(state.home)
+		end
+		task.wait(0.2)
+	else
+		task.wait(0.5)
+	end
+end
+
+local function run(model)
+	if brains[model] or not model:IsA("Model") then return end
+	brains[model] = true
+	task.spawn(function()
+		local hum = model:WaitForChild("Humanoid", 10)
+		local root = model:WaitForChild("HumanoidRootPart", 10)
+		if not hum or not root then brains[model] = nil return end
+		if model:GetAttribute("AI_Behavior") ~= "idle" then root.Anchored = false end
+		pcall(function() root:SetNetworkOwner(nil) end)
+		local state = {home = root.Position, patrolIndex = 1}
+		while model.Parent and hum.Health > 0 do
+			local ok, err = pcall(step, model, hum, root, state)
+			if not ok then
+				warn("[AI_NPCBrain] " .. model.Name .. ": " .. tostring(err))
+				task.wait(1)
+			end
+		end
+		brains[model] = nil
+	end)
+end
+
+for _, m in ipairs(CollectionService:GetTagged("AI_NPC")) do run(m) end
+CollectionService:GetInstanceAddedSignal("AI_NPC"):Connect(run)
+]==]
+local AIKIT_CLIENT_BOOT_SOURCE = [==[
+-- AI Studio V6: İstemci çalışma zamanı (animasyonlar + kamera + efektler). Eklenti otomatik kurar.
+local AIKit = require(game:GetService("ReplicatedStorage"):WaitForChild("AIKit"))
+AIKit.StartClient()
+]==]
+
+-- AIKit modülünü, Remote'u ve istemci başlatıcıyı kurar / günceller
+local function ensureKit()
+	local mod = ReplicatedStorage:FindFirstChild("AIKit")
+	if mod and not mod:IsA("ModuleScript") then mod:Destroy() mod = nil end
+	if not mod then
+		mod = Instance.new("ModuleScript")
+		mod.Name = "AIKit"
+		mod.Parent = ReplicatedStorage
+	end
+	mod.Source = AIKIT_MODULE_SOURCE
+	if not mod:FindFirstChild("Remote") then
+		local re = Instance.new("RemoteEvent")
+		re.Name = "Remote"
+		re.Parent = mod
+	end
+	local folder = ReplicatedStorage:FindFirstChild("AI_Animations") or Instance.new("Folder")
+	folder.Name = "AI_Animations"
+	folder.Parent = ReplicatedStorage
+	local sps = StarterPlayer:FindFirstChild("StarterPlayerScripts")
+	if sps then
+		local boot = sps:FindFirstChild("AI_ClientRuntime") or Instance.new("LocalScript")
+		boot.Name = "AI_ClientRuntime"
+		boot.Source = AIKIT_CLIENT_BOOT_SOURCE
+		boot.Parent = sps
+	end
+	return mod
+end
+
+local function ensureNpcBrain()
+	local s = ServerScriptService:FindFirstChild("AI_NPCBrain") or Instance.new("Script")
+	s.Name = "AI_NPCBrain"
+	s.Source = AIKIT_NPC_BRAIN_SOURCE
+	s.Parent = ServerScriptService
+end
+
+local R15_PARENT_MAP = {
+	LowerTorso = "HumanoidRootPart", UpperTorso = "LowerTorso", Head = "UpperTorso",
+	RightUpperArm = "UpperTorso", RightLowerArm = "RightUpperArm", RightHand = "RightLowerArm",
+	LeftUpperArm = "UpperTorso", LeftLowerArm = "LeftUpperArm", LeftHand = "LeftLowerArm",
+	RightUpperLeg = "LowerTorso", RightLowerLeg = "RightUpperLeg", RightFoot = "RightLowerLeg",
+	LeftUpperLeg = "LowerTorso", LeftLowerLeg = "LeftUpperLeg", LeftFoot = "LeftLowerLeg",
+}
+local R6_PARENT_MAP = {
+	Torso = "HumanoidRootPart", Head = "Torso",
+	["Right Arm"] = "Torso", ["Left Arm"] = "Torso", ["Right Leg"] = "Torso", ["Left Leg"] = "Torso",
+}
+
+local function rigIsR6(rig, fallbackType)
+	if rig then
+		local hum = rig:FindFirstChildOfClass("Humanoid")
+		if hum then return hum.RigType == Enum.HumanoidRigType.R6 end
+		if rig:FindFirstChild("Torso") and not rig:FindFirstChild("UpperTorso") then return true end
+		return false
+	end
+	return string.upper(tostring(fallbackType or "R15")) == "R6"
+end
+
+-- create_animation: preset VEYA özel keyframe'lerden KeyframeSequence üretir (ReplicatedStorage.AI_Animations)
+local function buildKeyframeSequence(act)
+	ensureKit()
+	local folder = ReplicatedStorage:FindFirstChild("AI_Animations")
+	local targetRig = findTargetRig(act.rig_path)
+	local isR6 = rigIsR6(targetRig, act.rig_type)
+	local parentMap = {}
 	if targetRig then
 		for _, d in ipairs(targetRig:GetDescendants()) do
 			if d:IsA("Motor6D") and d.Part0 and d.Part1 then parentMap[d.Part1.Name] = d.Part0.Name end
 		end
-	else
-		parentMap = {
-			LowerTorso = "HumanoidRootPart", UpperTorso = "LowerTorso", Head = "UpperTorso",
-			RightUpperArm = "UpperTorso", RightLowerArm = "RightUpperArm", RightHand = "RightLowerArm",
-			LeftUpperArm = "UpperTorso", LeftLowerArm = "LeftUpperArm", LeftHand = "LeftLowerArm",
-			RightUpperLeg = "LowerTorso", RightLowerLeg = "RightUpperLeg", RightFoot = "RightLowerLeg",
-			LeftUpperLeg = "LowerTorso", LeftLowerLeg = "LeftUpperLeg", LeftFoot = "LeftLowerLeg",
-			Torso = "HumanoidRootPart"
-		}
+	end
+	for k, v in pairs(isR6 and R6_PARENT_MAP or R15_PARENT_MAP) do
+		if not parentMap[k] then parentMap[k] = v end
+	end
+
+	local keyframes = act.keyframes
+	local presetInfo = nil
+	if act.preset and act.preset ~= "" then
+		local generated, info = buildPresetKeyframes(act.preset, isR6, act.speed, act.intensity)
+		if generated then keyframes, presetInfo = generated, info end
+	end
+	keyframes = keyframes or {}
+	if #keyframes == 0 then
+		local generated, info = buildPresetKeyframes("idle", isR6, 1, 1)
+		keyframes, presetInfo = generated, info
+	end
+
+	local animName = act.name or (act.preset and ("AI_" .. tostring(act.preset))) or "AI_Animation"
+	for _, old in ipairs(folder:GetChildren()) do
+		if old.Name == animName then old:Destroy() end
 	end
 
 	local kfs = Instance.new("KeyframeSequence")
-	kfs.Name = act.name or "AI_Animation"
-	kfs.Loop = act.loop == true
-	kfs.Priority = Enum.AnimationPriority[act.priority or "Action"] or Enum.AnimationPriority.Action
+	kfs.Name = animName
+	local loop = act.loop
+	if loop == nil and presetInfo then loop = presetInfo.loop end
+	kfs.Loop = loop == true
+	local prio = act.priority or (presetInfo and presetInfo.priority) or "Action"
+	kfs.Priority = Enum.AnimationPriority[prio] or Enum.AnimationPriority.Action
+	kfs:SetAttribute("RigType", isR6 and "R6" or "R15")
 
-	for _, kfData in ipairs(act.keyframes or {}) do
+	for _, kfData in ipairs(keyframes) do
 		local kf = Instance.new("Keyframe")
 		kf.Time = tonumber(kfData.time) or 0
 		kf.Parent = kfs
@@ -817,18 +1525,150 @@ local function buildKeyframeSequence(act)
 			local pos = poseData.pos or {0, 0, 0}
 			local rot = poseData.rot or {0, 0, 0}
 			p.CFrame = CFrame.new(pos[1] or 0, pos[2] or 0, pos[3] or 0) * CFrame.Angles(math.rad(rot[1] or 0), math.rad(rot[2] or 0), math.rad(rot[3] or 0))
-			local easing = Enum.PoseEasingStyle[poseData.easing or "Cubic"]
+			local easing = Enum.PoseEasingStyle[poseData.easing or kfData.easing or "Cubic"]
 			if easing then p.EasingStyle = easing end
 		end
 	end
 
 	kfs.Parent = folder
-	if targetRig then
+	if targetRig and act.save_to_rig ~= false then
 		local animSaves = targetRig:FindFirstChild("AnimSaves") or Instance.new("Model", targetRig)
 		animSaves.Name = "AnimSaves"
+		local oldSave = animSaves:FindFirstChild(animName)
+		if oldSave then oldSave:Destroy() end
 		kfs:Clone().Parent = animSaves
 	end
 	return kfs, targetRig
+end
+
+-- Paylaşılan hareket animasyonlarını (AI_R15_Walk vb.) yoksa üretir
+local function ensureLocomotionAnim(isR6, presetName)
+	local folder = ReplicatedStorage:FindFirstChild("AI_Animations")
+	local name = string.format("AI_%s_%s", isR6 and "R6" or "R15", presetName:sub(1, 1):upper() .. presetName:sub(2))
+	if not (folder and folder:FindFirstChild(name)) then
+		buildKeyframeSequence({name = name, preset = presetName, rig_type = isR6 and "R6" or "R15", save_to_rig = false})
+	end
+	return name
+end
+
+local function toColor(v, def)
+	if type(v) == "table" and #v >= 3 then return Color3.fromRGB(v[1], v[2], v[3]) end
+	return def
+end
+
+-- spawn_rig: resmi rig + renk + animasyon + davranış (tek aksiyonda hazır, yürüyen NPC)
+local function spawnRig(act)
+	ensureKit()
+	local isR6 = string.upper(tostring(act.rig_type or "R15")) == "R6"
+	local rnd = Random.new()
+	local skins = {
+		Color3.fromRGB(255, 220, 185), Color3.fromRGB(234, 192, 160), Color3.fromRGB(204, 142, 105),
+		Color3.fromRGB(160, 105, 75), Color3.fromRGB(110, 72, 50), Color3.fromRGB(245, 205, 165),
+	}
+	local skin = toColor(act.skin_color, skins[rnd:NextInteger(1, #skins)])
+	local shirt = toColor(act.shirt_color, Color3.fromHSV(rnd:NextNumber(), 0.65, 0.85))
+	local pants = toColor(act.pants_color, Color3.fromHSV(rnd:NextNumber(), 0.35, 0.35))
+
+	local desc = Instance.new("HumanoidDescription")
+	desc.HeadColor = skin
+	desc.LeftArmColor = skin
+	desc.RightArmColor = skin
+	desc.TorsoColor = shirt
+	desc.LeftLegColor = pants
+	desc.RightLegColor = pants
+
+	local ok, rig = pcall(function()
+		return Players:CreateHumanoidModelFromDescription(desc, isR6 and Enum.HumanoidRigType.R6 or Enum.HumanoidRigType.R15)
+	end)
+	if not ok or not rig then return nil, tostring(rig) end
+
+	local parent = resolveOrSearchPath(act.parent) or workspace
+	local name = act.name or "NPC"
+	if act.replace ~= false then
+		for _, ch in ipairs(parent:GetChildren()) do
+			if ch.Name == name and ch:IsA("Model") then ch:Destroy() end
+		end
+	end
+	rig.Name = name
+	rig.Parent = parent
+	if type(act.scale) == "number" and act.scale > 0 and act.scale ~= 1 then pcall(function() rig:ScaleTo(act.scale) end) end
+	local pos = act.position or {0, 5, 0}
+	local rotY = tonumber(act.rotation_y) or (type(act.rotation) == "table" and tonumber(act.rotation[2])) or 0
+	rig:PivotTo(CFrame.new(pos[1] or 0, (pos[2] or 5), pos[3] or 0) * CFrame.Angles(0, math.rad(rotY), 0))
+
+	local static = act.anchored == true or act.behavior == "static"
+	for _, p in ipairs(rig:GetDescendants()) do
+		if p:IsA("BasePart") then p.Anchored = false end
+	end
+	if static then rig.HumanoidRootPart.Anchored = true end
+
+	local hum = rig:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.WalkSpeed = tonumber(act.walk_speed) or 12
+		if act.display_name then hum.DisplayName = tostring(act.display_name) end
+		if act.hide_name == true then hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end
+		if not hum:FindFirstChildOfClass("Animator") then Instance.new("Animator", hum) end
+	end
+
+	rig:SetAttribute("AI_IdleAnim", act.idle_anim or ensureLocomotionAnim(isR6, "idle"))
+	rig:SetAttribute("AI_WalkAnim", act.walk_anim or ensureLocomotionAnim(isR6, "walk"))
+	rig:SetAttribute("AI_RunAnim", act.run_anim or ensureLocomotionAnim(isR6, "run"))
+	CollectionService:AddTag(rig, "AI_Locomotion")
+
+	local behavior = act.behavior or "idle"
+	if behavior ~= "static" then
+		rig:SetAttribute("AI_Behavior", behavior)
+		if act.wander_radius then rig:SetAttribute("AI_WanderRadius", tonumber(act.wander_radius)) end
+		if type(act.patrol_points) == "table" then rig:SetAttribute("AI_Patrol", HttpService:JSONEncode(act.patrol_points)) end
+		if act.target_path then rig:SetAttribute("AI_TargetPath", tostring(act.target_path)) end
+		if act.follow_distance then rig:SetAttribute("AI_FollowDistance", tonumber(act.follow_distance)) end
+		if act.sight_range then rig:SetAttribute("AI_SightRange", tonumber(act.sight_range)) end
+		CollectionService:AddTag(rig, "AI_NPC")
+		ensureNpcBrain()
+	end
+	if type(act.attributes) == "table" then
+		for k, v in pairs(act.attributes) do pcall(function() rig:SetAttribute(tostring(k), v) end) end
+	end
+	return rig
+end
+
+-- setup_camera: test edilmiş kamera sistemini yapılandırır (third_person, follow, first_person, top_down, isometric, side_scroller, broadcast)
+local CAMERA_DEFAULTS = {
+	third_person = {distance = 11, height = 2, shoulder = 2.2, fov = 70, sprint_fov = 84},
+	follow = {distance = 14, height = 2, shoulder = 0, fov = 70, sprint_fov = 82},
+	first_person = {distance = 0.5, height = 0, shoulder = 0, fov = 80, sprint_fov = 90},
+	top_down = {distance = 45, height = 0, shoulder = 0, fov = 50, sprint_fov = 55},
+	isometric = {distance = 40, height = 0, shoulder = 0, fov = 40, sprint_fov = 44},
+	side_scroller = {distance = 30, height = 4, shoulder = 0, fov = 55, sprint_fov = 60},
+	broadcast = {distance = 70, height = 40, shoulder = 0, fov = 45, sprint_fov = 48},
+}
+local function setupCamera(act)
+	local mod = ensureKit()
+	local mode = string.lower(tostring(act.mode or "third_person"))
+	if mode == "default" then
+		mod:SetAttribute("CameraMode", "default")
+		return mode
+	end
+	local d = CAMERA_DEFAULTS[mode] or CAMERA_DEFAULTS.third_person
+	if not CAMERA_DEFAULTS[mode] then mode = "third_person" end
+	mod:SetAttribute("CameraMode", mode)
+	mod:SetAttribute("CamDistance", tonumber(act.distance) or d.distance)
+	mod:SetAttribute("CamHeight", tonumber(act.height) or d.height)
+	mod:SetAttribute("CamShoulder", tonumber(act.shoulder_offset) or d.shoulder)
+	mod:SetAttribute("CamFov", tonumber(act.fov) or d.fov)
+	mod:SetAttribute("CamSprintFov", tonumber(act.sprint_fov) or d.sprint_fov)
+	mod:SetAttribute("CamLockMouse", act.lock_mouse == true)
+	mod:SetAttribute("CamTarget", act.target_path and tostring(act.target_path) or "")
+	mod:SetAttribute("SprintEnabled", act.sprint ~= false)
+	mod:SetAttribute("WalkSpeed", tonumber(act.walk_speed) or 16)
+	mod:SetAttribute("SprintSpeed", tonumber(act.sprint_speed) or 26)
+	-- Eski / çakışan kamera scriptlerini devre dışı bırak
+	local sps = StarterPlayer:FindFirstChild("StarterPlayerScripts")
+	if sps and act.disable_cutscene ~= false then
+		local dir = sps:FindFirstChild("AI_DirectorCameraPlayer")
+		if dir and dir:IsA("LocalScript") then dir.Disabled = true end
+	end
+	return mode
 end
 
 local function getDirectorPlayerSource()
@@ -1052,9 +1892,30 @@ local function executeActions(actions)
 
 			elseif t == "create_animation" then
 				local kfs, rig = buildKeyframeSequence(act)
-				table.insert(logs, "🎬 Animasyon Üretildi: " .. kfs:GetFullName() .. (rig and (" (+ " .. rig.Name .. ".AnimSaves)") or ""))
+				table.insert(logs, "🎬 Animasyon Üretildi: " .. kfs:GetFullName() .. (act.preset and (" [preset: " .. tostring(act.preset) .. "]") or "") .. (rig and (" (+ " .. rig.Name .. ".AnimSaves)") or ""))
+
+			elseif t == "spawn_rig" then
+				local rig, err = spawnRig(act)
+				if rig then
+					table.insert(logs, string.format("🧍 Rig Oluşturuldu: %s (%s, davranış: %s, yürüme/koşma/bekleme animasyonlu)", rig:GetFullName(), tostring(act.rig_type or "R15"), tostring(act.behavior or "idle")))
+				else
+					table.insert(logs, "! Rig oluşturulamadı: " .. tostring(err))
+				end
+
+			elseif t == "setup_camera" then
+				local mode = setupCamera(act)
+				table.insert(logs, "🎥 Oyun Kamerası Kuruldu: " .. tostring(mode) .. " (AIKit, Shift ile koşu, dinamik FOV)")
+
+			elseif t == "install_kit" then
+				ensureKit()
+				table.insert(logs, "🧰 AIKit kuruldu: ReplicatedStorage.AIKit")
 
 			elseif t == "create_cutscene" then
+				local kitMod = ReplicatedStorage:FindFirstChild("AIKit")
+				if kitMod then kitMod:SetAttribute("CameraMode", "default") end
+				local spsDir = StarterPlayer:FindFirstChild("StarterPlayerScripts")
+				local dirLs = spsDir and spsDir:FindFirstChild("AI_DirectorCameraPlayer")
+				if dirLs and dirLs:IsA("LocalScript") then dirLs.Disabled = false end
 				local cName, kfCount = buildDirectorCutscene(act)
 				table.insert(logs, string.format("🎥 Yönetmen Kamerası Kuruldu: %s (%d Keyframe)", cName, kfCount))
 
