@@ -613,19 +613,20 @@ runLongBtn.TextSize = 10
 runLongBtn.Parent = longRow
 styleBox(runLongBtn)
 
--- 6. 4 BİRİM CANLI DURUM AKIŞI (1 MAIN AGENT + 3 BÜTÜNLEŞİK KATMAN) + DETAYLI RAPOR
-makeLabel("4 BİRİM CANLI DURUM PANELİ (1 MAIN + 3 KATMAN)", 19)
+-- 6. 5 BİRİM CANLI DURUM AKIŞI (1 MAIN AGENT + 4 BÜTÜNLEŞİK KATMAN) + DETAYLI RAPOR
+makeLabel("5 BİRİM CANLI DURUM PANELİ (1 MAIN + 4 KATMAN)", 19)
 
-local AGENT_4_LIST = {
+local AGENT_5_LIST = {
 	{ id = "main_agent", label = "0. Main Agent" },
 	{ id = "layer_world_builder", label = "1. Dünya & Animasyon" },
-	{ id = "layer_client_core", label = "2. İstemci Beyni" },
-	{ id = "layer_server_core", label = "3. Sunucu Hakemi" },
+	{ id = "layer_camera_fx", label = "2. Kamera Efektleri" },
+	{ id = "layer_client_core", label = "3. İstemci Beyni" },
+	{ id = "layer_server_core", label = "4. Sunucu Hakemi" },
 }
 
 local agentGridFrame = Instance.new("Frame")
 agentGridFrame.LayoutOrder = 20
-agentGridFrame.Size = UDim2.new(1, 0, 0, 64)
+agentGridFrame.Size = UDim2.new(1, 0, 0, 96)
 agentGridFrame.BackgroundTransparency = 1
 agentGridFrame.Parent = root
 
@@ -636,7 +637,7 @@ agentGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 agentGridLayout.Parent = agentGridFrame
 
 local agentGridCards = {}
-for idx, item in ipairs(AGENT_4_LIST) do
+for idx, item in ipairs(AGENT_5_LIST) do
 	local card = Instance.new("TextLabel")
 	card.LayoutOrder = idx
 	card.BackgroundColor3 = C.CARD
