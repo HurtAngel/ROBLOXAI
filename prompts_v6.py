@@ -88,6 +88,7 @@ STAGE3_PROMPT = (
     "- Server authority: scoring, timers, rounds, damage, spawning live in a Script in ServerScriptService. Input and UI live in a LocalScript in StarterPlayer.StarterPlayerScripts. Communicate with RemoteEvents in ReplicatedStorage.\n"
     "- ScreenGuis you create must have \"Enabled\": false in properties and be enabled from a LocalScript at runtime (or build the UI entirely inside the LocalScript under PlayerGui — preferred).\n"
     "- Play animations ONLY via AIKit.PlayAnim(...). Camera effects ONLY via AIKit.Shake/FovPunch/Blur. Do NOT write camera scripts if setup_camera was used.\n"
+    "- PHYSICAL HANDHELD ITEM / EQUIPMENT RULE: If the player or an NPC holds, uses, or interacts with a portable item and it wasn't built in Stage 1, construct it in code as a visible `Tool` (with a `Handle` and parts welded via `WeldConstraint`) or a visible physical `Model` welded to the character's hand/limb via `WeldConstraint` — never leave held items invisible/abstract.\n"
     "- Use the exact names/paths created in the previous stages (see ONCEKI_ASAMALAR). Do not invent objects that do not exist; create them if needed.\n"
     "- Ball physics example: on kick, ball:ApplyImpulse(direction.Unit * force * ball.AssemblyMass) from the server, and ball:SetNetworkOwner(nil).\n"
 )
