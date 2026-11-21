@@ -298,20 +298,22 @@ def build_dynamic_directives(prompt_text: str, directives_cfg: dict) -> list[str
             "rig.Name = 'RigAdi'; rig.Parent = workspace; rig:PivotTo(CFrame.new(0, 5, 0)); "
             "for _, p in ipairs(rig:GetDescendants()) do if p:IsA('BasePart') then p.Anchored = (p.Name == 'HumanoidRootPart') end end\n"
             "KRİTİK: Roblox Studio Animation Editor'ın rigi hareket ettirebilmesi için SADECE `HumanoidRootPart.Anchored = true` olmalı, "
-            "tüm diğer uzuv parçaları `Anchored = false` olmalı ve eklemler `Motor6D` ile bağlı kalmalıdır (özel/insansı olmayan yaratık rigi yapıyorsan da PrimaryPart=HumanoidRootPart, Humanoid+Animator ve tüm uzuvlar Motor6D + Anchored=false olmalıdır). "
-            "Ardından renk, zırh, kıyafet veya silahı bu resmi rigin üzerine ekle. "
-            "Animasyon eklerken aynı `actions` listesinde `run_luau` sonrasında `create_animation` aksiyonunu `\"rig_path\": \"Workspace.RigAdi\"` ile çağır ki animasyon doğrudan `RigAdi.AnimSaves` içine kaydedilip Studio Animation Editor'dan açılabilsin."
+            "tüm diğer uzuv parçaları `Anchored = false` olmalı ve eklemler `Motor6D` ile bağlı kalmalıdır. "
+            "ASLA `run_luau` içinde elle `KeyframeSequence`/`Pose` yazma — animasyonları SADECE `create_animation` aksiyonu ile `\"rig_path\": \"Workspace.RigAdi\"` vererek üret ki doğrudan `RigAdi.AnimSaves` içine kaydedilip Studio Animation Editor'dan açılabilsin."
         )
     if req_anim:
         rules.append(
             "[ZORUNLU KARAKTER ANİMASYONU]: Karakter asla kütük gibi sabit kalmamalıdır! "
-            "Saldırı/yetenek anlarında mutlaka R6/R15 Motor6D eklemlerini (RightShoulder, LeftShoulder, Waist/Torso, Neck, RightHip, LeftHip) "
-            "TweenService veya RunService ile akıcı şekilde bükerek dinamik savurma/duruş animasyonları uygula."
+            "Hem Studio Animation Editor için `create_animation` ile tam R15/R6 keyframe animasyonu üret (doğru `rig_path` ile), "
+            "hem de çalışma zamanında Motor6D eklemlerini (RightShoulder, LeftShoulder, Waist/Torso, Neck, RightHip, LeftHip) "
+            "akıcı şekilde hareket ettir."
         )
     if req_cam:
         rules.append(
-            "[3. ŞAHIS AKSİYON KAMERASI]: Kamerayı dinamik omuz üstü / 3. şahıs aksiyon takip açısına ayarla; "
-            "yetenek ve vuruş anlarında TweenService ile FOV genişlemesi/daralması, mikro kamera sarsıntısı (camera shake) ve darbe anında kısa hitstop ekle."
+            "[SİNEMATİK KAMERA, FOV/POV GEÇİŞLERİ & BLUR/POST-FX]: Kamera asla sabit ve tekdüze kalmamalıdır! "
+            "Çoklu POV açıları (geniş plan, omuz üstü, alt açı, yakın plan), dramatik FOV değişimleri (örn. 75 -> 38 -> 85), "
+            "kamera sarsıntısı (shake), hitstop ve Lighting altında mutlaka `BlurEffect` + `DepthOfFieldEffect` + `BloomEffect` + `ColorCorrectionEffect` "
+            "kullanarak geçişlerde TweenService ile akıcı blur/odak ve FOV animasyonları uygula."
         )
     if req_vfx:
         rules.append(
@@ -1294,7 +1296,7 @@ async def log_err(request: Request):
     return {"status": "ok"}
 
 # --- ASENKRON ANA AJAN MOTORU (DÜŞÜNME MODU + DİNAMİK KURAL + TOOLBOX DÖNGÜSÜ) ---
-async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_mode: bool = False) -> str:
+async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_mode: bool = False, stage_prefix: str = "") -> str:
     headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
     base_payload = {
         "model": cfg["chat_model"],
@@ -1325,6 +1327,7 @@ async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_m
 
     collected = []
     reasoning_collected = []
+    prefix = f"{stage_prefix}\n" if stage_prefix else ""
     async with httpx.AsyncClient() as client:
         for idx, venice_payload in enumerate(candidate_payloads):
             async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
@@ -1349,12 +1352,12 @@ async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_m
                         reasoning_piece = delta.get("reasoning_content") or ""
                         if content:
                             collected.append(content)
-                            buf = "".join(collected)[-2500:]
+                            buf = prefix + "".join(collected)[-2500:]
                             TASKS[task_id]["buffer"] = buf
                             LIVE_STATE["buffer"] = buf
                         elif reasoning_piece and not collected:
                             reasoning_collected.append(reasoning_piece)
-                            rbuf = "[Düşünüyor...] " + "".join(reasoning_collected)[-1500:]
+                            rbuf = prefix + "[Düşünüyor...] " + "".join(reasoning_collected)[-1500:]
                             TASKS[task_id]["buffer"] = rbuf
                             LIVE_STATE["buffer"] = rbuf
                     except Exception:
@@ -1396,39 +1399,158 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     LIVE_STATE["status"] = f"{user['username']} ({'Derin' if thinking_mode else 'Hızlı'} Mod) üretiliyor..."
     LIVE_STATE["buffer"] = ""
 
-    messages = [
-        {"role": "system", "content": cfg["system_prompt"] + mode_instruction},
-        {"role": "user", "content": json.dumps(enriched_payload, ensure_ascii=False)[:120000]}
-    ]
+    base_sys = cfg["system_prompt"] + mode_instruction
+    user_json_str = json.dumps(enriched_payload, ensure_ascii=False)[:120000]
+    is_syntax_repair = bool(payload.get("is_syntax_repair", False))
 
     try:
         total_out_tokens = 0
         repaired_json = {}
 
-        for _turn in range(2):
-            full_output = await stream_venice_call(cfg, messages, task_id, thinking_mode=thinking_mode)
+        if is_syntax_repair:
+            messages = [
+                {"role": "system", "content": base_sys},
+                {"role": "user", "content": user_json_str}
+            ]
+            full_output = await stream_venice_call(cfg, messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Syntax Onarımı]")
             total_out_tokens += estimate_tokens(full_output)
             repaired_json = extract_and_repair_json(full_output)
+        else:
+            # --- 1 INPUT -> 3 SIRALI OUTPUT (1: YAPILAR & RIGLER, 2: ANİMASYONLAR & KAMERA/BLUR, 3: SCRİPTLER/KODLAR) ---
+            combined_actions = []
+            combined_thoughts = []
+            stage_summaries = []
 
-            queries = repaired_json.get("search_toolbox") or []
-            if queries and isinstance(queries, list) and _turn == 0:
-                LIVE_STATE["status"] = f"Toolbox aranıyor: {', '.join(queries[:4])}"
-                TASKS[task_id]["buffer"] = f"Roblox Toolbox'ta 3D modeller aranıyor: {', '.join(queries[:4])}..."
-                toolbox_results = {}
-                for q in queries[:4]:
-                    toolbox_results[str(q)] = await search_roblox_toolbox(str(q), limit=6)
+            # AŞAMA 1/3: YAPILAR, SAHNE & RESMİ ROBLOX RİGLERİ
+            stage1_sys = base_sys + (
+                "\n\n[AŞAMA 1/3 - SADECE YAPILAR, 3D SAHNE, IŞIK/POST-FX VE RESMİ RİGLER]:\n"
+                "- Bu aşamada SADECE 3D ortam, mimari, proplar, Terrain, Lighting efektleri (BlurEffect, DepthOfFieldEffect, BloomEffect, ColorCorrectionEffect, Atmosphere) ve RESMİ ROBLOX RİGLERİ üret.\n"
+                "- İnsansı karakter/NPC/Boss için ASLA sıfırdan ham Part birleştirme! Mutlaka `run_luau` ile `Players:CreateHumanoidModelFromDescription(Instance.new('HumanoidDescription'), Enum.HumanoidRigType.R15)` (veya R6) kullan, SADECE `HumanoidRootPart.Anchored = true` yap, tüm diğer uzuvları `Anchored = false` bırak.\n"
+                "- Bu aşamada `write_script`, `edit_script`, `create_animation`, `create_cutscene` veya manuel `KeyframeSequence` ÜRETME (onlar Aşama 2 ve 3'te üretilecek).\n"
+                "- Eğer görevde yeni yapı/rig gerekmiyorsa `actions: []` döndür."
+            )
+            LIVE_STATE["status"] = f"{user['username']} | Aşama 1/3: Yapılar & Resmi Rigler..."
+            s1_messages = [
+                {"role": "system", "content": stage1_sys},
+                {"role": "user", "content": user_json_str}
+            ]
+            s1_json = {}
+            for _turn in range(2):
+                s1_out = await stream_venice_call(cfg, s1_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 1/3: Yapılar & Resmi Rigler]")
+                total_out_tokens += estimate_tokens(s1_out)
+                s1_json = extract_and_repair_json(s1_out)
 
-                messages.append({"role": "assistant", "content": full_output})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "TOOLBOX_ARAMA_SONUCLARI:\n"
-                        + json.dumps(toolbox_results, ensure_ascii=False)
-                        + "\nŞimdi en uygun AssetId'leri seçerek `insert_asset` aksiyonlarını (ve gerekiyorsa `write_script` / `run_luau` aksiyonlarını) içeren nihai JSON yanıtını döndür. Tekrar search_toolbox çağırma."
-                    )
+                if s1_json.get("need_files"):
+                    repaired_json = s1_json
+                    break
+
+                queries = s1_json.get("search_toolbox") or []
+                if queries and isinstance(queries, list) and _turn == 0:
+                    LIVE_STATE["status"] = f"Aşama 1/3 Toolbox aranıyor: {', '.join(queries[:4])}"
+                    TASKS[task_id]["buffer"] = f"[Aşama 1/3] Roblox Toolbox'ta 3D modeller aranıyor: {', '.join(queries[:4])}..."
+                    toolbox_results = {}
+                    for q in queries[:4]:
+                        toolbox_results[str(q)] = await search_roblox_toolbox(str(q), limit=6)
+                    s1_messages.append({"role": "assistant", "content": s1_out})
+                    s1_messages.append({
+                        "role": "user",
+                        "content": (
+                            "TOOLBOX_ARAMA_SONUCLARI:\n"
+                            + json.dumps(toolbox_results, ensure_ascii=False)
+                            + "\nŞimdi en uygun AssetId'leri seçerek SADECE Aşama 1/3 (Yapılar, 3D modeller ve Resmi Rigler) aksiyonlarını döndür. Tekrar search_toolbox çağırma."
+                        )
+                    })
+                    continue
+                break
+
+            if not repaired_json.get("need_files"):
+                s1_actions = [a for a in (s1_json.get("actions") or []) if a.get("type") != "fallback_code"]
+                combined_actions.extend(s1_actions)
+                if s1_json.get("thought"):
+                    combined_thoughts.append("[1/3 Yapılar] " + str(s1_json.get("thought")))
+                stage_summaries.append({
+                    "stage": "1_structures_and_rigs",
+                    "thought": s1_json.get("thought", ""),
+                    "actions_summary": [
+                        {"type": a.get("type"), "name": a.get("name"), "path": a.get("path"), "parent": a.get("parent"), "description": a.get("description")}
+                        for a in s1_actions
+                    ]
                 })
-                continue
-            break
+
+                # AŞAMA 2/3: ANİMASYONLAR & SİNEMATİK KAMERA (FOV, POV, BLUR/DOF)
+                stage2_sys = base_sys + (
+                    "\n\n[AŞAMA 2/3 - SADECE ANİMASYONLAR, SİNEMATİK KAMERA (FOV/POV) VE BLUR/POST-FX]:\n"
+                    "- Aşama 1/3'te oluşturulan yapılar ve resmi rigler sahnede hazır.\n"
+                    "- Bu aşamada SADECE:\n"
+                    "  1) `create_animation` aksiyonları üret (doğru `rig_path` ile, örn. `Workspace.RigAdi`, zengin kronolojik R15/R6 `keyframes` ve `poses` ile — ASLA `run_luau` içinde elle `KeyframeSequence` yazma!).\n"
+                    "  2) Sinematik kamera / sahne çekimi gerekiyorsa `create_cutscene` ve `set_camera` üret: çoklu POV açıları (geniş, omuz üstü, alt açı, yakın plan), belirgin FOV değişimleri (örn. 75 -> 38 -> 85), kamera sarsıntısı (`shake`) ve `cinematic_bars` ekle.\n"
+                    "  3) `Lighting` altında eksikse `BlurEffect`, `DepthOfFieldEffect`, `BloomEffect`, `ColorCorrectionEffect` oluştur (`create_instance`).\n"
+                    "- Bu aşamada 3D yapı/rigleri tekrar üretme ve `write_script`/`edit_script` yazma (scriptler Aşama 3/3'te yazılacak)."
+                )
+                LIVE_STATE["status"] = f"{user['username']} | Aşama 2/3: Animasyonlar & Kamera/Blur..."
+                s2_payload = {
+                    "KULLANICI_KOMUTU": payload.get("prompt", ""),
+                    "ACTIVE_QUALITY_DIRECTIVES": active_directives,
+                    "ASAMA_1_YAPILAR_VE_RIGLER": stage_summaries[0],
+                    "SCENE_HIERARCHY": payload.get("scene_hierarchy", {}),
+                    "SELECTED_ITEMS": payload.get("selected_items", [])
+                }
+                s2_messages = [
+                    {"role": "system", "content": stage2_sys},
+                    {"role": "user", "content": json.dumps(s2_payload, ensure_ascii=False)[:100000]}
+                ]
+                s2_out = await stream_venice_call(cfg, s2_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 2/3: Animasyonlar & Kamera/FOV/Blur]")
+                total_out_tokens += estimate_tokens(s2_out)
+                s2_json = extract_and_repair_json(s2_out)
+                s2_actions = [a for a in (s2_json.get("actions") or []) if a.get("type") != "fallback_code"]
+                combined_actions.extend(s2_actions)
+                if s2_json.get("thought"):
+                    combined_thoughts.append("[2/3 Animasyon & Kamera] " + str(s2_json.get("thought")))
+                stage_summaries.append({
+                    "stage": "2_animations_and_camera",
+                    "thought": s2_json.get("thought", ""),
+                    "actions_summary": [
+                        {"type": a.get("type"), "name": a.get("name"), "rig_path": a.get("rig_path"), "path": a.get("path")}
+                        for a in s2_actions
+                    ]
+                })
+
+                # AŞAMA 3/3: SCRİPTLER & ÇALIŞMA ZAMANI KODLARI
+                stage3_sys = base_sys + (
+                    "\n\n[AŞAMA 3/3 - SADECE SCRİPTLER VE ÇALIŞMA ZAMANI LUAU KODLARI]:\n"
+                    "- Aşama 1/3 (Yapılar & Resmi Rigler) ve Aşama 2/3 (Animasyonlar, Cutscene & Blur/Post-FX) sahnede hazır.\n"
+                    "- Bu aşamada SADECE `write_script` ve `edit_script` (gerekirse `RemoteEvent` için `create_instance`) üret.\n"
+                    "- `LocalScript`leri her zaman `StarterPlayer.StarterPlayerScripts` içine koy.\n"
+                    "- Eğer Aşama 2/3'te `create_cutscene` kullanılmadıysa ve kamera/aksiyon gerekiyorsa, dinamik FOV/POV geçişleri ve `Lighting.BlurEffect` / `DepthOfFieldEffect` animasyonları yapan temiz bir kamera `LocalScript`i yaz (eğer `create_cutscene` zaten kullanıldıysa kamera `LocalScript`i yazma, sadece FOV/Blur/etkileşim/oyun mantığı scriptlerini yaz).\n"
+                    "- Aşama 1/3 yapılarını veya Aşama 2/3 animasyonlarını tekrar üretme ya da silme."
+                )
+                LIVE_STATE["status"] = f"{user['username']} | Aşama 3/3: Scriptler & Kodlar..."
+                s3_payload = {
+                    "KULLANICI_KOMUTU": payload.get("prompt", ""),
+                    "ACTIVE_QUALITY_DIRECTIVES": active_directives,
+                    "ONCEKI_ASAMALAR": stage_summaries,
+                    "GECMIS_HAFIZA": memory_list,
+                    "SCENE_HIERARCHY": payload.get("scene_hierarchy", {}),
+                    "SELECTED_ITEMS": payload.get("selected_items", []),
+                    "PROJECT_INDEX": payload.get("project_shortened_index", []),
+                    "REQUESTED_FILES_CONTENT": payload.get("requested_files_content", {})
+                }
+                s3_messages = [
+                    {"role": "system", "content": stage3_sys},
+                    {"role": "user", "content": json.dumps(s3_payload, ensure_ascii=False)[:100000]}
+                ]
+                s3_out = await stream_venice_call(cfg, s3_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 3/3: Scriptler & Kodlar]")
+                total_out_tokens += estimate_tokens(s3_out)
+                s3_json = extract_and_repair_json(s3_out)
+                s3_actions = [a for a in (s3_json.get("actions") or []) if a.get("type") != "fallback_code"]
+                combined_actions.extend(s3_actions)
+                if s3_json.get("thought"):
+                    combined_thoughts.append("[3/3 Kodlar] " + str(s3_json.get("thought")))
+
+                repaired_json = {
+                    "thought": "\n".join(combined_thoughts) if combined_thoughts else "3 aşamalı üretim tamamlandı.",
+                    "actions": combined_actions
+                }
 
         if user["role"] != "admin":
             total_cost = int((raw_in_tokens * cfg["input_cost_mult"]) + (total_out_tokens * cfg["output_cost_mult"]))
