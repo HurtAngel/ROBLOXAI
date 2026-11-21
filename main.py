@@ -90,7 +90,7 @@ def build_full_state_snapshot() -> dict:
     memories = [dict(m) for m in conn.execute("SELECT * FROM memory_logs ORDER BY id DESC LIMIT 100").fetchall()]
     conn.close()
     return {
-        "backup_version": "7.0-multi-agent-14",
+        "backup_version": "7.5-multi-agent-15",
         "synced_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg,
         "users": users,
@@ -226,7 +226,7 @@ def init_db():
         try:
             parsed_state = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
             if apply_full_state_snapshot(parsed_state):
-                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve 14-Agent ayarları başarıyla geri yüklendi.")
+                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve 15-Agent ayarları başarıyla geri yüklendi.")
         except Exception as e:
             print(f"[Upstash Redis] Başlangıç geri yükleme hatası: {e}")
 
@@ -238,7 +238,7 @@ def get_db():
     return conn
 
 async def get_fresh_config() -> dict:
-    """Her çağrıda güncel 14-Agent ayarlarını Upstash Redis'ten okur (erişilemezse yerel SQLite'a düşer)."""
+    """Her çağrıda güncel 15-Agent ayarlarını Upstash Redis'ten okur (erişilemezse yerel SQLite'a düşer)."""
     url, token = get_upstash_creds()
     if url and token:
         try:
@@ -569,18 +569,18 @@ async def web_portal():
 
         <div class="card">
             <h3>
-                <span>14 Agent Orkestrasyon Ayarları (1 Ana Orkestratör + 13 Uzman Alt Agent)</span>
+                <span>15 Agent Orkestrasyon Ayarları (1 Ana Orkestratör + 14 Uzman Alt Agent)</span>
                 <div style="display:flex; gap:8px; align-items:center;">
                     <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(true)">Tümünü Aç</button>
                     <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(false)">Tümünü Kapat</button>
                 </div>
             </h3>
             <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
-                Her agent için bağımsız Model ID (ör. <code>claude-haiku-5-5</code>, <code>qwen3-235b-a22b-instruct-2507</code>, <code>mistral-small-3-2-24b-instruct</code>) ve evrensel sistem talimatı atayabilirsin. Kaydettiğinde tüm 14 agent ayarı anında Upstash Redis'e yazılır ve her çağrıda oradan okunur.
+                Her agent için bağımsız Model ID (ör. <code>claude-haiku-5-5</code>, <code>qwen3-235b-a22b-instruct-2507</code>, <code>mistral-small-3-2-24b-instruct</code>) ve evrensel sistem talimatı atayabilirsin. Kaydettiğinde tüm 15 agent ayarı anında Upstash Redis'e yazılır ve her çağrıda oradan okunur.
             </p>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:16px; background:var(--bg); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
                 <input type="text" id="bulk_agent_model" placeholder="Toplu Model ID (ör. claude-haiku-5-5)" style="margin:0; flex:1;">
-                <button class="btn btn-amber btn-sm" onclick="applyBulkAgentModel()">Tüm 14 Agent'a Uygula</button>
+                <button class="btn btn-amber btn-sm" onclick="applyBulkAgentModel()">Tüm 15 Agent'a Uygula</button>
             </div>
             <div id="agents-accordion-container">Yükleniyor...</div>
             <button class="btn btn-success" style="width:100%; margin-top:12px; padding:12px;" onclick="saveSettings()">💾 Ayarları Kaydet (ve Upstash'e Eşitle)</button>
@@ -667,7 +667,7 @@ async def web_portal():
 
     <div id="sec-live" class="section">
         <div class="card">
-            <h3>Aktif Model & 14 Agent Canlı Boru Hattı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
+            <h3>Aktif Model & 15 Agent Canlı Boru Hattı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
             <div id="live-pipeline-grid" class="pipe-grid"></div>
             <div class="log-box" id="live-stream-box" style="min-height:140px; max-height:460px; overflow:auto; border-left:3px solid var(--success);">Bekleniyor...</div>
         </div>
@@ -889,7 +889,7 @@ async function saveSettings() {
         agents: agentsPayload
     });
     if (res.ok) {
-        alert('Tüm 14 Agent ve sistem ayarları kaydedildi, Upstash Redis ile eşitlendi.');
+        alert('Tüm 15 Agent ve sistem ayarları kaydedildi, Upstash Redis ile eşitlendi.');
     } else {
         alert('Ayarlar kaydedilirken hata oluştu.');
     }
@@ -1698,7 +1698,7 @@ async def discover_project(request: Request, client_key: str = Header(None)):
         "LATEST_USER_MESSAGE": user_msg,
         "CONVERSATION_HISTORY": session["conversation"][-8:],
         "EXISTING_PROJECT_NOTES": session["project_notes"],
-        "AVAILABLE_13_SUBAGENTS": [
+        "AVAILABLE_14_SUBAGENTS": [
             {"id": a["id"], "title": a["title"], "phase": a["phase"], "description": a["description"]}
             for a in V7.SUB_AGENTS
         ],
@@ -1822,7 +1822,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     is_syntax_repair = bool(payload.get("is_syntax_repair", False))
     scene_compact = V6.compact_scene(payload.get("scene_hierarchy", {}))
 
-    # 14 Agent Canlı Boru Hattı Durumu
+    # 15 Agent Canlı Boru Hattı Durumu
     pipeline: list[dict] = [
         {
             "id": a["id"],
@@ -1850,7 +1850,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             TASKS[task_id]["buffer"] = report
         return report
 
-    LIVE_STATE["status"] = f"{user['username']} | V7 14-Agent Orkestrasyon başlıyor..."
+    LIVE_STATE["status"] = f"{user['username']} | V7.5 15-Agent Orkestrasyon başlıyor..."
     LIVE_STATE["buffer"] = ""
     sync_live("Main Agent başlatılıyor...")
 
@@ -1910,12 +1910,12 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             main_cfg = agents_cfg["main_agent"]
             pipe_by_id["main_agent"]["status"] = "running"
             LIVE_STATE["status"] = f"{user['username']} | Main Agent yönlendirme planı hazırlıyor..."
-            sync_live("Main Agent 13 alt agent arasından sadece gerekenleri seçiyor...")
+            sync_live("Main Agent 14 alt agent için katı PASS kuralıyla yönlendirme yapıyor...")
 
             route_sys = (
                 main_cfg["prompt"]
                 + "\n\n[AKTİF MOD: ROUTE (SEÇİCİ AGENT YÖNLENDİRME & SHARED_MANIFEST)]\n"
-                + "- 13 alt agent'tan YALNIZCA gerçekten gerekli olanlara `\"status\": \"ACTIVE\"` ve özel `task_input` ver; gereksiz veya kullanıcının reddettiği tüm agent'lara `\"status\": \"PASS\"` ve kısa `reason` yaz.\n"
+                + "- 14 alt agent için KATI PASS KURALINA uy: PROJECT_NOTES içinde geçen her kategori ZORUNLU ACTIVE, yalnızca hiç geçmeyen veya kullanıcının açıkça reddettiği agent'lar PASS olacak şekilde `\"status\": \"ACTIVE\"` ve özel `task_input` ver; gereksiz veya kullanıcının reddettiği tüm agent'lara `\"status\": \"PASS\"` ve kısa `reason` yaz.\n"
                 + "- SADECE geçerli tek bir JSON objesi döndür (markdown/kod bloğu yok)."
             )
             route_payload = {
@@ -1925,7 +1925,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 "DISCOVERY_CONVERSATION": discovery_conv[-8:],
                 "GECMIS_HAFIZA": memory_list,
                 "ACTIVE_QUALITY_DIRECTIVES": active_directives,
-                "AVAILABLE_13_SUBAGENTS": [
+                "AVAILABLE_14_SUBAGENTS": [
                     {"id": a["id"], "order": a["order"], "phase": a["phase"], "title": a["title"], "description": a["description"], "allowed_actions": a["allowed_actions"]}
                     for a in V7.SUB_AGENTS
                 ],
@@ -1941,7 +1941,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                 ],
                 task_id,
                 thinking_mode=thinking_mode,
-                stage_prefix=f"[0/13 Main Agent Yönlendirme — {main_cfg['model']}]",
+                stage_prefix=f"[0/14 Main Agent Yönlendirme — {main_cfg['model']}]",
                 model_override=main_cfg["model"],
                 buffer_builder=lambda tail: V7.format_pipeline_report(pipeline, handoffs, tail),
             )
@@ -2116,8 +2116,10 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     if aid == "agent_animation" and shared_manifest.get("animations"):
                         anames = [x.get("name") if isinstance(x, dict) else str(x) for x in shared_manifest["animations"]]
                         handoffs.append(f"Agent 5 (Animasyon) Manifeste Yazdı ({len(anames)}): {', '.join(anames[:15])}")
-                    elif aid == "agent_ui" and shared_manifest.get("ui_elements"):
-                        handoffs.append(f"Agent 6 (UI/HUD) Manifeste Yazdı: {len(shared_manifest['ui_elements'])} UI elemanı")
+                    elif aid == "agent_ui_menus" and shared_manifest.get("ui_elements"):
+                        handoffs.append(f"Agent 6 (UI, HUD & Menü) Manifeste Yazdı: {len(shared_manifest['ui_elements'])} UI elemanı")
+                    elif aid == "agent_player_guide" and (shared_manifest.get("guide_elements") or shared_manifest.get("scripts")):
+                        handoffs.append(f"Agent 7 (Oyuncu Rehberi) Manifeste Yazdı: {len(shared_manifest.get('guide_elements', []))} rehber öğesi")
                     elif aid == "agent_architecture" and shared_manifest.get("world_objects"):
                         handoffs.append(f"Agent 1 (Mimari) Manifeste Yazdı: {len(shared_manifest['world_objects'])} sahne yapısı")
 
@@ -2163,7 +2165,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     combined_actions.insert(0, {"type": "setup_atmosphere"})
 
                 repaired_json = {
-                    "thought": "\n".join(combined_thoughts) if combined_thoughts else "V7 14-Agent üretimi tamamlandı.",
+                    "thought": "\n".join(combined_thoughts) if combined_thoughts else "V7.5 15-Agent üretimi tamamlandı.",
                     "actions": combined_actions,
                     "agent_pipeline": pipeline,
                     "handoff_logs": handoffs,
@@ -2233,7 +2235,7 @@ async def execute_task(request: Request, client_key: str = Header(None)):
         return JSONResponse({"error": "Yetersiz kredi (Token)."}, status_code=402)
 
     task_id = str(uuid.uuid4())
-    TASKS[task_id] = {"status": "processing", "buffer": "V7 14-Agent Orkestratör başlatılıyor...", "agent_pipeline": [], "handoff_logs": []}
+    TASKS[task_id] = {"status": "processing", "buffer": "V7.5 15-Agent Orkestratör başlatılıyor...", "agent_pipeline": [], "handoff_logs": []}
     asyncio.create_task(process_task(task_id, user, payload, raw_in_tokens))
     return {"task_id": task_id, "role": user["role"], "username": user["username"]}
 
