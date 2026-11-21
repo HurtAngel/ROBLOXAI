@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import prompts_v6 as V6
+import agents_v7 as V7
 
 try:
     from duckduckgo_search import DDGS
@@ -22,8 +23,9 @@ app = FastAPI()
 DB_FILE = "architect_v3.db"
 REDIS_CFG_FILE = "upstash_conn.json"
 TASKS = {}
+DISCOVERY_SESSIONS = {}
 ERROR_LOGS = []
-LIVE_STATE = {"status": "Boşta", "buffer": "", "model": "openai-gpt-oss-120b"}
+LIVE_STATE = {"status": "Boşta", "buffer": "", "model": "claude-haiku-5-5", "pipeline": [], "handoffs": []}
 
 DEFAULT_UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "https://selected-chamois-177802.upstash.io").strip()
 DEFAULT_UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "gQAAAAAAAraKAAIgcDFhNjM1ZTZhZTIzYTc0NTQyOTMyY2Y2ZDg4Mzk0YTZmMw").strip()
@@ -62,11 +64,11 @@ def upstash_cmd_sync(command_args: list):
         ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Upstash Sync Hatası", "details": str(e)})
     return None
 
-async def upstash_cmd_async(command_args: list):
+async def upstash_cmd_async(command_args: list, timeout: float = 15.0):
     url, token = get_upstash_creds()
     if not url or not token:
         raise ValueError("Upstash URL veya Token tanımlı değil.")
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         r = await client.post(
             url,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -81,11 +83,14 @@ def build_full_state_snapshot() -> dict:
     conn.row_factory = sqlite3.Row
     cfg_row = conn.execute("SELECT * FROM config WHERE id=1").fetchone()
     cfg = dict(cfg_row) if cfg_row else {}
+    if cfg:
+        norm_agents = V7.normalize_agents_config(cfg.get("agents_config"), fallback_model=cfg.get("chat_model", ""))
+        cfg["agents_config"] = json.dumps(norm_agents, ensure_ascii=False)
     users = [dict(u) for u in conn.execute("SELECT * FROM users").fetchall()]
     memories = [dict(m) for m in conn.execute("SELECT * FROM memory_logs ORDER BY id DESC LIMIT 100").fetchall()]
     conn.close()
     return {
-        "backup_version": "4.5-aaa-studio",
+        "backup_version": "7.0-multi-agent-14",
         "synced_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg,
         "users": users,
@@ -98,8 +103,9 @@ def apply_full_state_snapshot(data: dict) -> bool:
     conn = sqlite3.connect(DB_FILE)
     if "config" in data and isinstance(data["config"], dict) and data["config"]:
         c = data["config"]
+        norm_agents = V7.normalize_agents_config(c.get("agents_config"), fallback_model=c.get("chat_model", ""))
         conn.execute(
-            "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, expander_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=?, expander_prompt=? WHERE id=1",
+            "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, expander_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=?, expander_prompt=?, agents_config=? WHERE id=1",
             (
                 c.get("venice_key", ""),
                 c.get("chat_model", "openai-gpt-oss-120b"),
@@ -111,6 +117,7 @@ def apply_full_state_snapshot(data: dict) -> bool:
                 c.get("output_cost_mult", 2.0),
                 c.get("system_prompt", ""),
                 c.get("expander_prompt") or V6.EXPANDER_PROMPT,
+                json.dumps(norm_agents, ensure_ascii=False),
             )
         )
     if "users" in data and isinstance(data["users"], list) and len(data["users"]) > 0:
@@ -173,9 +180,10 @@ def init_db():
         input_cost_mult REAL,
         output_cost_mult REAL,
         system_prompt TEXT,
-        expander_prompt TEXT
+        expander_prompt TEXT,
+        agents_config TEXT
     )''')
-    for col, col_type in (("expander_model", "TEXT"), ("expander_prompt", "TEXT")):
+    for col, col_type in (("expander_model", "TEXT"), ("expander_prompt", "TEXT"), ("agents_config", "TEXT")):
         try:
             c.execute(f"ALTER TABLE config ADD COLUMN {col} {col_type}")
         except Exception:
@@ -197,16 +205,18 @@ def init_db():
         )
 
     default_expander_model = os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
+    default_agents_json = json.dumps(V7.get_default_agents_config(), ensure_ascii=False)
     c.execute("SELECT COUNT(*) FROM config")
     if c.fetchone()[0] == 0:
         default_prompt = V6.CORE_RULES
         c.execute(
-            "INSERT INTO config (id, venice_key, chat_model, summarizer_model, image_model, expander_model, default_signup_tokens, input_cost_mult, output_cost_mult, system_prompt, expander_prompt) VALUES (1, '', 'openai-gpt-oss-120b', 'google-gemma-3-27b-it', 'seedream-v5-5', ?, 30000, 1.0, 2.0, ?, ?)",
-            (default_expander_model, default_prompt, V6.EXPANDER_PROMPT)
+            "INSERT INTO config (id, venice_key, chat_model, summarizer_model, image_model, expander_model, default_signup_tokens, input_cost_mult, output_cost_mult, system_prompt, expander_prompt, agents_config) VALUES (1, '', 'openai-gpt-oss-120b', 'google-gemma-3-27b-it', 'seedream-v5-5', ?, 30000, 1.0, 2.0, ?, ?, ?)",
+            (default_expander_model, default_prompt, V6.EXPANDER_PROMPT, default_agents_json)
         )
     else:
         c.execute("UPDATE config SET expander_model = ? WHERE id=1 AND (expander_model IS NULL OR expander_model = '')", (default_expander_model,))
         c.execute("UPDATE config SET expander_prompt = ? WHERE id=1 AND (expander_prompt IS NULL OR expander_prompt = '')", (V6.EXPANDER_PROMPT,))
+        c.execute("UPDATE config SET agents_config = ? WHERE id=1 AND (agents_config IS NULL OR agents_config = '')", (default_agents_json,))
     conn.commit()
     conn.close()
 
@@ -216,7 +226,7 @@ def init_db():
         try:
             parsed_state = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
             if apply_full_state_snapshot(parsed_state):
-                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve ayarlar başarıyla geri yüklendi.")
+                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve 14-Agent ayarları başarıyla geri yüklendi.")
         except Exception as e:
             print(f"[Upstash Redis] Başlangıç geri yükleme hatası: {e}")
 
@@ -226,6 +236,50 @@ def get_db():
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
+
+async def get_fresh_config() -> dict:
+    """Her çağrıda güncel 14-Agent ayarlarını Upstash Redis'ten okur (erişilemezse yerel SQLite'a düşer)."""
+    url, token = get_upstash_creds()
+    if url and token:
+        try:
+            raw_state = await upstash_cmd_async(["GET", "ai_studio_v4_state"], timeout=4.5)
+            if raw_state:
+                parsed = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
+                if isinstance(parsed, dict) and isinstance(parsed.get("config"), dict) and parsed["config"]:
+                    c = parsed["config"]
+                    norm_agents = V7.normalize_agents_config(c.get("agents_config"), fallback_model=c.get("chat_model", ""))
+                    conn = get_db()
+                    conn.execute(
+                        "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, expander_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=?, expander_prompt=?, agents_config=? WHERE id=1",
+                        (
+                            c.get("venice_key", ""),
+                            c.get("chat_model", "openai-gpt-oss-120b"),
+                            c.get("summarizer_model", "google-gemma-3-27b-it"),
+                            c.get("image_model", "seedream-v5-5"),
+                            c.get("expander_model") or os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5"),
+                            c.get("default_signup_tokens", 30000),
+                            c.get("input_cost_mult", 1.0),
+                            c.get("output_cost_mult", 2.0),
+                            c.get("system_prompt", ""),
+                            c.get("expander_prompt") or V6.EXPANDER_PROMPT,
+                            json.dumps(norm_agents, ensure_ascii=False),
+                        )
+                    )
+                    conn.commit()
+                    conn.close()
+        except Exception:
+            pass
+
+    conn = get_db()
+    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
+    conn.close()
+    cfg["agents"] = V7.normalize_agents_config(cfg.get("agents_config"), fallback_model=cfg.get("chat_model", ""))
+    cfg["agents_config"] = json.dumps(cfg["agents"], ensure_ascii=False)
+    if not cfg.get("expander_model"):
+        cfg["expander_model"] = os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
+    if not cfg.get("expander_prompt"):
+        cfg["expander_prompt"] = V6.EXPANDER_PROMPT
+    return cfg
 
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
@@ -420,6 +474,21 @@ async def web_portal():
         .admin-only { display: none; }
         .log-box { background: var(--bg); border: 1px solid var(--border); padding: 14px; border-radius: 6px; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
         .img-preview { max-width: 100%; max-height: 420px; border-radius: 8px; border: 1px solid var(--border); margin-top: 14px; display: none; }
+        .phase-heading { font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--accent); margin: 18px 0 10px 0; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .agent-acc { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+        .agent-acc-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; cursor: pointer; user-select: none; background: #141419; gap: 10px; }
+        .agent-acc-head:hover { background: #1b1b22; }
+        .agent-acc-title { font-size: 13px; font-weight: 600; color: #fff; }
+        .agent-acc-desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+        .agent-model-pill { font-family: monospace; font-size: 11px; padding: 3px 8px; border-radius: 999px; background: #1f2937; color: #93c5fd; border: 1px solid #334155; white-space: nowrap; }
+        .agent-acc-body { display: none; padding: 14px; border-top: 1px solid var(--border); }
+        .agent-acc.open .agent-acc-body { display: block; }
+        .pipe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-bottom: 14px; }
+        .pipe-chip { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; }
+        .pipe-chip.running { border-color: var(--accent); background: #0f1c33; }
+        .pipe-chip.done { border-color: var(--success); background: #0c241c; }
+        .pipe-chip.pass { opacity: 0.55; border-style: dashed; }
+        .pipe-chip.error { border-color: var(--danger); background: #2a1215; }
     </style>
 </head>
 <body>
@@ -472,11 +541,14 @@ async def web_portal():
 <div class="main" style="display:none;" id="main">
     <div id="sec-settings" class="section admin-only">
         <div class="card">
-            <h3>Venice API, Çift Model ve Token Maliyet Ayarları</h3>
+            <h3>
+                <span>Venice API, Genel Modeller & Maliyet Ayarları</span>
+                <button class="btn btn-success btn-sm" onclick="saveSettings()">💾 Tüm Ayarları Kaydet (Upstash'e Eşitle)</button>
+            </h3>
             <label>Venice.ai API Anahtarı</label>
             <input type="password" id="venice_key">
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-                <div><label>Ana Kodlayıcı Model</label><input type="text" id="chat_model"></div>
+                <div><label>Yedek / Varsayılan Kodlayıcı Model</label><input type="text" id="chat_model"></div>
                 <div><label>Prompt Zenginleştirici Model (Expander)</label><input type="text" id="expander_model" placeholder="claude-haiku-5-5"></div>
                 <div><label>Özetleyici Model (Indexer)</label><input type="text" id="summarizer_model"></div>
                 <div><label>Görsel Modeli</label><input type="text" id="image_model"></div>
@@ -486,11 +558,32 @@ async def web_portal():
                 <div><label>Input Token Çarpanı</label><input type="number" step="0.1" id="input_cost_mult"></div>
                 <div><label>Output Token Çarpanı</label><input type="number" step="0.1" id="output_cost_mult"></div>
             </div>
-            <label>Evrensel Sistem Talimatı (System Prompt)</label>
-            <textarea id="system_prompt" rows="10"></textarea>
-            <label>Prompt Zenginleştirici Sistem Talimatı (Expander Prompt)</label>
-            <textarea id="expander_prompt" rows="12"></textarea>
-            <button class="btn" onclick="saveSettings()">Ayarları Kaydet (ve Upstash'e Eşitle)</button>
+            <details style="margin-bottom:8px;">
+                <summary style="cursor:pointer; font-size:12px; color:var(--muted); margin-bottom:10px;">Ek Genel Sistem Talimatı & Prompt Zenginleştirici Talimatı (Aç/Kapat)</summary>
+                <label>Ek Evrensel Sistem Talimatı (System Prompt)</label>
+                <textarea id="system_prompt" rows="6"></textarea>
+                <label>Prompt Zenginleştirici Sistem Talimatı (Expander Prompt)</label>
+                <textarea id="expander_prompt" rows="8"></textarea>
+            </details>
+        </div>
+
+        <div class="card">
+            <h3>
+                <span>14 Agent Orkestrasyon Ayarları (1 Ana Orkestratör + 13 Uzman Alt Agent)</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(true)">Tümünü Aç</button>
+                    <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(false)">Tümünü Kapat</button>
+                </div>
+            </h3>
+            <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
+                Her agent için bağımsız Model ID (ör. <code>claude-haiku-5-5</code>, <code>qwen3-235b-a22b-instruct-2507</code>, <code>mistral-small-3-2-24b-instruct</code>) ve evrensel sistem talimatı atayabilirsin. Kaydettiğinde tüm 14 agent ayarı anında Upstash Redis'e yazılır ve her çağrıda oradan okunur.
+            </p>
+            <div style="display:flex; gap:10px; align-items:center; margin-bottom:16px; background:var(--bg); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
+                <input type="text" id="bulk_agent_model" placeholder="Toplu Model ID (ör. claude-haiku-5-5)" style="margin:0; flex:1;">
+                <button class="btn btn-amber btn-sm" onclick="applyBulkAgentModel()">Tüm 14 Agent'a Uygula</button>
+            </div>
+            <div id="agents-accordion-container">Yükleniyor...</div>
+            <button class="btn btn-success" style="width:100%; margin-top:12px; padding:12px;" onclick="saveSettings()">💾 Ayarları Kaydet (ve Upstash'e Eşitle)</button>
         </div>
     </div>
 
@@ -574,8 +667,9 @@ async def web_portal():
 
     <div id="sec-live" class="section">
         <div class="card">
-            <h3>Aktif Model & Canlı AI Akışı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
-            <div class="log-box" id="live-stream-box" style="min-height:110px; border-left:3px solid var(--success);">Bekleniyor...</div>
+            <h3>Aktif Model & 14 Agent Canlı Boru Hattı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
+            <div id="live-pipeline-grid" class="pipe-grid"></div>
+            <div class="log-box" id="live-stream-box" style="min-height:140px; max-height:460px; overflow:auto; border-left:3px solid var(--success);">Bekleniyor...</div>
         </div>
         <div class="card">
             <h3>Hata Kayıtları <button class="btn btn-sm" onclick="loadLiveAndErrors()">Yenile</button></h3>
@@ -682,6 +776,78 @@ async function apiFetch(url, method='GET', body=null) {
     return fetch(url, opts);
 }
 
+let loadedAgentsMeta = [];
+
+function escHtml(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderAgentAccordions(metaList, agentsCfg) {
+    loadedAgentsMeta = metaList || [];
+    const container = document.getElementById('agents-accordion-container');
+    if (!container) return;
+    let html = '';
+    let lastPhase = null;
+    for (const m of loadedAgentsMeta) {
+        if (m.phase !== lastPhase) {
+            html += `<div class="phase-heading"><span>▸ ${escHtml(m.phase_label)}</span></div>`;
+            lastPhase = m.phase;
+        }
+        const cur = (agentsCfg && agentsCfg[m.id]) || {};
+        const modelVal = cur.model || m.default_model || 'claude-haiku-5-5';
+        const promptVal = cur.prompt || m.default_prompt || '';
+        const openCls = m.id === 'main_agent' ? ' open' : '';
+        html += `
+        <div class="agent-acc${openCls}" id="acc-${m.id}">
+            <div class="agent-acc-head" onclick="document.getElementById('acc-${m.id}').classList.toggle('open')">
+                <div>
+                    <div class="agent-acc-title">${escHtml(m.title)} <span style="font-size:11px; color:var(--muted); font-family:monospace;">(${escHtml(m.id)})</span></div>
+                    <div class="agent-acc-desc">${escHtml(m.description)}</div>
+                </div>
+                <span class="agent-model-pill" id="pill-${m.id}">${escHtml(modelVal)}</span>
+            </div>
+            <div class="agent-acc-body">
+                <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom:10px;">
+                    <div style="flex:1;">
+                        <label>Model ID</label>
+                        <input type="text" id="ag-model-${m.id}" value="${escHtml(modelVal)}" placeholder="claude-haiku-5-5 / qwen3-235b-a22b-instruct-2507 / mistral-small-3-2-24b-instruct" style="margin-bottom:0;" oninput="document.getElementById('pill-${m.id}').innerText = this.value.trim() || 'varsayılan'">
+                    </div>
+                    <button class="btn btn-sm" style="background:#27272a; height:38px;" onclick="resetAgentDefault('${m.id}')">Varsayılana Sıfırla</button>
+                </div>
+                <label>Evrensel Sistem Talimatı (System Prompt)</label>
+                <textarea id="ag-prompt-${m.id}" rows="9" style="margin-bottom:0;">${escHtml(promptVal)}</textarea>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function toggleAllAccordions(open) {
+    document.querySelectorAll('.agent-acc').forEach(el => el.classList.toggle('open', open));
+}
+
+function applyBulkAgentModel() {
+    const val = document.getElementById('bulk_agent_model').value.trim();
+    if (!val) return alert('Lütfen bir Model ID girin.');
+    for (const m of loadedAgentsMeta) {
+        const inp = document.getElementById('ag-model-' + m.id);
+        const pill = document.getElementById('pill-' + m.id);
+        if (inp) inp.value = val;
+        if (pill) pill.innerText = val;
+    }
+}
+
+function resetAgentDefault(agentId) {
+    const meta = loadedAgentsMeta.find(x => x.id === agentId);
+    if (!meta) return;
+    const mEl = document.getElementById('ag-model-' + agentId);
+    const pEl = document.getElementById('ag-prompt-' + agentId);
+    const pill = document.getElementById('pill-' + agentId);
+    if (mEl) mEl.value = meta.default_model;
+    if (pEl) pEl.value = meta.default_prompt;
+    if (pill) pill.innerText = meta.default_model;
+}
+
 async function loadSettings() {
     const res = await apiFetch('/api/admin/config');
     if (!res.ok) return;
@@ -696,10 +862,20 @@ async function loadSettings() {
     document.getElementById('output_cost_mult').value = cfg.output_cost_mult || 2.0;
     document.getElementById('system_prompt').value = cfg.system_prompt || '';
     document.getElementById('expander_prompt').value = cfg.expander_prompt || '';
+    renderAgentAccordions(cfg.agents_meta || [], cfg.agents || {});
 }
 
 async function saveSettings() {
-    await apiFetch('/api/admin/config', 'POST', {
+    const agentsPayload = {};
+    for (const m of loadedAgentsMeta) {
+        const mEl = document.getElementById('ag-model-' + m.id);
+        const pEl = document.getElementById('ag-prompt-' + m.id);
+        agentsPayload[m.id] = {
+            model: (mEl ? mEl.value.trim() : '') || m.default_model,
+            prompt: (pEl ? pEl.value : '') || m.default_prompt
+        };
+    }
+    const res = await apiFetch('/api/admin/config', 'POST', {
         venice_key: document.getElementById('venice_key').value.trim(),
         chat_model: document.getElementById('chat_model').value.trim(),
         expander_model: document.getElementById('expander_model').value.trim() || 'claude-haiku-5-5',
@@ -709,9 +885,14 @@ async function saveSettings() {
         input_cost_mult: parseFloat(document.getElementById('input_cost_mult').value) || 1.0,
         output_cost_mult: parseFloat(document.getElementById('output_cost_mult').value) || 2.0,
         system_prompt: document.getElementById('system_prompt').value,
-        expander_prompt: document.getElementById('expander_prompt').value
+        expander_prompt: document.getElementById('expander_prompt').value,
+        agents: agentsPayload
     });
-    alert('Ayarlar kaydedildi ve Upstash Redis ile eşitlendi.');
+    if (res.ok) {
+        alert('Tüm 14 Agent ve sistem ayarları kaydedildi, Upstash Redis ile eşitlendi.');
+    } else {
+        alert('Ayarlar kaydedilirken hata oluştu.');
+    }
 }
 
 async function loadUsers() {
@@ -890,6 +1071,18 @@ async function loadLiveAndErrors() {
     if (!res.ok) return;
     const data = await res.json();
     document.getElementById('active-model-badge').innerText = `Aktif Model: ${data.live.model}`;
+    const pipeGrid = document.getElementById('live-pipeline-grid');
+    if (pipeGrid) {
+        const pipe = data.live.pipeline || [];
+        const labelMap = { running: '🔄 ÇALIŞIYOR', done: '✅ TAMAM', pass: '⏭️ PASS', active: '⏳ AKTİF', pending: '· BEKLİYOR', error: '❌ HATA' };
+        pipeGrid.innerHTML = pipe.map(p => `
+            <div class="pipe-chip ${escHtml(p.status || 'pending')}">
+                <div style="font-weight:600; color:#fff;">${escHtml(p.title || p.id)}</div>
+                <div style="margin-top:3px; color:var(--muted);">${labelMap[p.status] || escHtml(p.status)}${p.actions_count ? ` (${p.actions_count} aks.)` : ''}</div>
+                ${p.model && p.status !== 'pass' ? `<div style="margin-top:2px; font-family:monospace; color:#93c5fd; font-size:10px;">${escHtml(p.model)}</div>` : ''}
+            </div>
+        `).join('');
+    }
     document.getElementById('live-stream-box').innerText = `Durum: ${data.live.status}\n\n${data.live.buffer || 'Bekleniyor...'}`;
     document.getElementById('errors-container').innerHTML = data.errors.length
         ? data.errors.map(e => `<div class="log-box" style="margin-bottom:10px; border-left:3px solid var(--danger);">[${e.time}] ${e.type}\n${e.details}</div>`).join('')
@@ -952,13 +1145,8 @@ async def auth_me(client_key: str = Header(None)):
 async def get_conf(client_key: str = Header(None)):
     if get_user_by_auth(client_key=client_key)["role"] != "admin":
         raise HTTPException(status_code=403)
-    conn = get_db()
-    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
-    conn.close()
-    if not cfg.get("expander_model"):
-        cfg["expander_model"] = os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
-    if not cfg.get("expander_prompt"):
-        cfg["expander_prompt"] = V6.EXPANDER_PROMPT
+    cfg = await get_fresh_config()
+    cfg["agents_meta"] = V7.get_agents_meta()
     return cfg
 
 @app.post("/api/admin/config")
@@ -968,16 +1156,23 @@ async def save_conf(request: Request, client_key: str = Header(None)):
     d = await request.json()
     expander_model = (d.get("expander_model") or "").strip() or os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
     expander_prompt = d.get("expander_prompt") or V6.EXPANDER_PROMPT
+    raw_agents = d.get("agents") if isinstance(d.get("agents"), dict) else d.get("agents_config")
+    norm_agents = V7.normalize_agents_config(raw_agents, fallback_model=d.get("chat_model", ""))
+    agents_json = json.dumps(norm_agents, ensure_ascii=False)
     conn = get_db()
     conn.execute(
-        "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, expander_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=?, expander_prompt=? WHERE id=1",
-        (d["venice_key"], d["chat_model"], d["summarizer_model"], d["image_model"], expander_model, d["default_signup_tokens"], d["input_cost_mult"], d["output_cost_mult"], d["system_prompt"], expander_prompt)
+        "UPDATE config SET venice_key=?, chat_model=?, summarizer_model=?, image_model=?, expander_model=?, default_signup_tokens=?, input_cost_mult=?, output_cost_mult=?, system_prompt=?, expander_prompt=?, agents_config=? WHERE id=1",
+        (
+            d["venice_key"], d["chat_model"], d["summarizer_model"], d["image_model"], expander_model,
+            d["default_signup_tokens"], d["input_cost_mult"], d["output_cost_mult"],
+            d["system_prompt"], expander_prompt, agents_json
+        )
     )
     conn.commit()
     conn.close()
-    LIVE_STATE["model"] = d["chat_model"]
-    trigger_bg_sync()
-    return {"status": "ok"}
+    LIVE_STATE["model"] = norm_agents["main_agent"]["model"]
+    await auto_push_to_upstash()
+    return {"status": "ok", "agents_count": len(norm_agents)}
 
 @app.get("/api/admin/users")
 async def get_users(client_key: str = Header(None)):
@@ -1251,10 +1446,11 @@ async def summarize_scripts(request: Request, client_key: str = Header(None)):
 async def live_status(client_key: str = Header(None)):
     get_user_by_auth(client_key=client_key)
     conn = get_db()
-    cfg = conn.execute("SELECT chat_model FROM config WHERE id=1").fetchone()
+    cfg = conn.execute("SELECT chat_model, agents_config FROM config WHERE id=1").fetchone()
     conn.close()
-    if cfg:
-        LIVE_STATE["model"] = cfg["chat_model"]
+    if cfg and not LIVE_STATE.get("model"):
+        agents = V7.normalize_agents_config(cfg["agents_config"], fallback_model=cfg["chat_model"])
+        LIVE_STATE["model"] = agents["main_agent"]["model"]
     return {"live": LIVE_STATE, "errors": list(reversed(ERROR_LOGS[-30:]))}
 
 @app.post("/api/log_error")
@@ -1263,35 +1459,20 @@ async def log_err(request: Request):
     ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": d.get("type", "Hata"), "details": d.get("details", "")})
     return {"status": "ok"}
 
-# --- ASENKRON ANA AJAN MOTORU (DÜŞÜNME MODU + DİNAMİK KURAL + TOOLBOX DÖNGÜSÜ) ---
-async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_mode: bool = False, stage_prefix: str = "") -> str:
+# --- ASENKRON ÇOKLU AGENT MOTORU (V7: 1 ANA ORKESTRATÖR + 13 ALT AGENT) ---
+async def stream_venice_call(
+    cfg: dict,
+    messages: list,
+    task_id: str,
+    thinking_mode: bool = False,
+    stage_prefix: str = "",
+    model_override: str | None = None,
+    buffer_builder=None,
+) -> str:
     headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
-    base_payload = {
-        "model": cfg["chat_model"],
-        "stream": True,
-        "max_tokens": 16384,
-        "messages": messages
-    }
-
-    if thinking_mode:
-        candidate_payloads = [base_payload]
-    else:
-        # Try hard-disabling reasoning first; fall back cleanly for models that reject reasoning.enabled=false
-        p1 = {
-            **base_payload,
-            "reasoning": {"enabled": False},
-            "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
-        }
-        p2 = {
-            **base_payload,
-            "reasoning_effort": "low",
-            "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
-        }
-        p3 = {
-            **base_payload,
-            "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
-        }
-        candidate_payloads = [p1, p2, p3]
+    primary_model = (model_override or "").strip() or cfg["chat_model"]
+    fallback_model = (cfg.get("chat_model") or "").strip() or primary_model
+    models_to_try = [primary_model] if fallback_model == primary_model else [primary_model, fallback_model]
 
     collected = []
     reasoning_collected = []
@@ -1309,46 +1490,127 @@ async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_m
             parts.append("[AÇIK ÇIKTI / OUTPUT]:\n" + "".join(collected))
         return "\n\n".join(parts)
 
+    last_err = ""
     async with httpx.AsyncClient() as client:
-        for idx, venice_payload in enumerate(candidate_payloads):
-            async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
-                if response.status_code == 400 and idx < len(candidate_payloads) - 1:
-                    await response.aread()
-                    continue
-                if response.status_code != 200:
-                    err_txt = (await response.aread()).decode("utf-8", errors="ignore")
-                    ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"Venice HTTP {response.status_code}", "details": err_txt})
-                    raise RuntimeError(f"API Hatası ({response.status_code})")
+        for mdl_idx, mdl in enumerate(models_to_try):
+            LIVE_STATE["model"] = mdl
+            base_payload = {
+                "model": mdl,
+                "stream": True,
+                "max_tokens": 16384,
+                "messages": messages,
+            }
+            if thinking_mode:
+                candidate_payloads = [base_payload]
+            else:
+                p1 = {
+                    **base_payload,
+                    "reasoning": {"enabled": False},
+                    "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+                }
+                p2 = {
+                    **base_payload,
+                    "reasoning_effort": "low",
+                    "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+                }
+                p3 = {
+                    **base_payload,
+                    "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+                }
+                candidate_payloads = [p1, p2, p3, base_payload]
 
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
+            succeeded = False
+            for idx, venice_payload in enumerate(candidate_payloads):
+                async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
+                    if response.status_code in (400, 404, 422) and idx < len(candidate_payloads) - 1:
+                        last_err = (await response.aread()).decode("utf-8", errors="ignore")
                         continue
-                    data_str = line[6:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                        delta = chunk["choices"][0].get("delta", {})
-                        content = delta.get("content") or ""
-                        reasoning_piece = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
-                        updated = False
-                        if reasoning_piece:
-                            reasoning_collected.append(reasoning_piece)
-                            updated = True
-                        if content:
-                            collected.append(content)
-                            updated = True
-                        if updated:
-                            full_stage = build_stage_full_text()
-                            LIVE_STATE["buffer"] = (stage_header + full_stage)[-200000:]
-                            if collected:
-                                TASKS[task_id]["buffer"] = prefix + "".join(collected)[-2500:]
-                            else:
-                                TASKS[task_id]["buffer"] = prefix + "[Düşünüyor...] " + "".join(reasoning_collected)[-1500:]
-                    except Exception:
-                        pass
+                    if response.status_code != 200:
+                        last_err = (await response.aread()).decode("utf-8", errors="ignore")
+                        if mdl_idx < len(models_to_try) - 1:
+                            break
+                        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"Venice HTTP {response.status_code} ({mdl})", "details": last_err[:400]})
+                        raise RuntimeError(f"API Hatası ({response.status_code} - {mdl})")
+
+                    succeeded = True
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk["choices"][0].get("delta", {})
+                            content = delta.get("content") or ""
+                            reasoning_piece = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
+                            updated = False
+                            if reasoning_piece:
+                                reasoning_collected.append(reasoning_piece)
+                                updated = True
+                            if content:
+                                collected.append(content)
+                                updated = True
+                            if updated:
+                                full_stage = build_stage_full_text()
+                                LIVE_STATE["buffer"] = (stage_header + full_stage)[-200000:]
+                                if task_id and task_id in TASKS:
+                                    live_tail = "".join(collected)[-1200:] if collected else ("[Düşünüyor...] " + "".join(reasoning_collected)[-800:])
+                                    if buffer_builder:
+                                        TASKS[task_id]["buffer"] = buffer_builder(prefix + live_tail)
+                                    else:
+                                        TASKS[task_id]["buffer"] = prefix + live_tail
+                        except Exception:
+                            pass
+                    break
+            if succeeded:
                 break
+        else:
+            ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Venice Model Hatası", "details": last_err[:400]})
+            raise RuntimeError(f"API Hatası: {last_err[:200] or 'Model yanıt vermedi'}")
     return "".join(collected)
+
+
+async def call_venice_json(cfg: dict, messages: list, model_name: str, max_tokens: int = 3072) -> tuple[str, str]:
+    """Non-streaming Venice AI call with automatic fallback model."""
+    headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
+    primary_model = (model_name or "").strip() or cfg["chat_model"]
+    fallback_model = (cfg.get("chat_model") or "").strip() or primary_model
+    models_to_try = [primary_model] if fallback_model == primary_model else [primary_model, fallback_model]
+    last_err = ""
+    async with httpx.AsyncClient(timeout=75.0) as client:
+        for mdl in models_to_try:
+            LIVE_STATE["model"] = mdl
+            payloads = [
+                {
+                    "model": mdl,
+                    "max_tokens": max_tokens,
+                    "messages": messages,
+                    "reasoning": {"enabled": False},
+                    "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+                },
+                {
+                    "model": mdl,
+                    "max_tokens": max_tokens,
+                    "messages": messages,
+                },
+            ]
+            for pld in payloads:
+                try:
+                    r = await client.post("https://api.venice.ai/api/v1/chat/completions", json=pld, headers=headers)
+                    if r.status_code == 200:
+                        data = r.json()
+                        msg = (data.get("choices") or [{}])[0].get("message") or {}
+                        content = str(msg.get("content") or "").strip()
+                        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                        if content:
+                            return content, mdl
+                    else:
+                        last_err = f"HTTP {r.status_code}: {r.text[:250]}"
+                except Exception as exc:
+                    last_err = str(exc)
+    raise RuntimeError(last_err or "Model boş yanıt döndürdü.")
+
 
 def mask_system_prompt_tools(sys_prompt: str, forbidden_types: set[str]) -> str:
     """Physically strips forbidden action schema lines from the system prompt so the model never sees them."""
@@ -1358,6 +1620,7 @@ def mask_system_prompt_tools(sys_prompt: str, forbidden_types: set[str]) -> str:
             continue
         kept.append(line)
     return "\n".join(kept)
+
 
 def build_rig_type_hints(payload: dict) -> list[str]:
     hints = []
@@ -1389,11 +1652,141 @@ def build_rig_type_hints(payload: dict) -> list[str]:
                 )
     return hints
 
-async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
-    conn = get_db()
-    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
 
-    # Context Window Trimming: yalnızca son 4 aktif adım hafızada tutulur
+# =====================================================================
+# ADIM A: ETKİLEŞİMLİ KEŞİF & NOT ALMA (POST /agent/discover)
+# =====================================================================
+@app.post("/agent/discover")
+@app.post("/api/agent/discover")
+async def discover_project(request: Request, client_key: str = Header(None)):
+    user = get_user_by_auth(client_key=client_key)
+    body = await request.json()
+    user_msg = str(body.get("prompt") or body.get("answer") or "").strip()
+    if not user_msg:
+        return JSONResponse({"error": "Boş istek analiz edilemez."}, status_code=400)
+
+    cfg = await get_fresh_config()
+    if not cfg.get("venice_key"):
+        return JSONResponse({"error": "Yönetici henüz Venice API anahtarını girmemiş."}, status_code=400)
+
+    session_id = str(body.get("session_id") or "").strip() or str(uuid.uuid4())
+    session = DISCOVERY_SESSIONS.get(session_id) or {
+        "session_id": session_id,
+        "user_id": user["id"],
+        "initial_prompt": user_msg,
+        "conversation": [],
+        "project_notes": {},
+        "round": 0,
+    }
+
+    if isinstance(body.get("project_notes"), dict) and body["project_notes"]:
+        session["project_notes"] = body["project_notes"]
+    if isinstance(body.get("conversation"), list) and body["conversation"]:
+        session["conversation"] = body["conversation"]
+
+    session["conversation"].append({"role": "user", "content": user_msg})
+    session["round"] = int(session.get("round", 0)) + 1
+
+    main_cfg = cfg["agents"]["main_agent"]
+    scene_compact = V6.compact_scene(body.get("scene_hierarchy", {}), limit=18000)
+
+    LIVE_STATE["status"] = f"{user['username']} | Main Agent Keşif & Not Alma (Tur {session['round']})..."
+    discover_payload = {
+        "MODE": "DISCOVER",
+        "ROUND": session["round"],
+        "INITIAL_PROMPT": session["initial_prompt"],
+        "LATEST_USER_MESSAGE": user_msg,
+        "CONVERSATION_HISTORY": session["conversation"][-8:],
+        "EXISTING_PROJECT_NOTES": session["project_notes"],
+        "AVAILABLE_13_SUBAGENTS": [
+            {"id": a["id"], "title": a["title"], "phase": a["phase"], "description": a["description"]}
+            for a in V7.SUB_AGENTS
+        ],
+        "SCENE_HIERARCHY": scene_compact,
+    }
+
+    discover_sys = (
+        main_cfg["prompt"]
+        + "\n\n[AKTİF MOD: DISCOVER (KEŞİF & NOT ALMA)]\n"
+        + "- SADECE geçerli tek bir JSON objesi döndür (markdown/kod bloğu yok).\n"
+        + "- Tur 1'de 3–5 adet kısa, net, maddeli açıklayıcı soru sor (kamera, NPC/bot isteği, tuş/mekanik, atmosfer/tema, kazanma/kaybetme vb.) ve ilk mesajdan çıkan kesin kuralları + negatif kısıtlamaları `project_notes` içine kaydet.\n"
+        + "- Tur 2 ve sonrasında kullanıcının cevaplarını `project_notes` içine işle; kritik belirsizlik kalmadıysa `\"status\": \"ready\"` ve `\"questions\": []` döndür (gerekirse en fazla 1 kısa takip sorusu sor).\n"
+        + "- Türkçe iletişim kur."
+    )
+
+    try:
+        raw_out, used_model = await call_venice_json(
+            cfg,
+            [
+                {"role": "system", "content": discover_sys},
+                {"role": "user", "content": json.dumps(discover_payload, ensure_ascii=False)[:60000]},
+            ],
+            model_name=main_cfg["model"],
+            max_tokens=3072,
+        )
+        parsed = extract_and_repair_json(raw_out)
+    except Exception as exc:
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Keşif Hatası", "details": str(exc)})
+        return JSONResponse({"error": f"Keşif başarısız: {exc}"}, status_code=502)
+
+    status = str(parsed.get("status") or ("ready" if session["round"] >= 2 else "needs_clarification")).strip().lower()
+    if status not in ("needs_clarification", "ready"):
+        status = "needs_clarification" if parsed.get("questions") else "ready"
+
+    questions = parsed.get("questions") if isinstance(parsed.get("questions"), list) else []
+    questions = [str(q).strip() for q in questions if str(q).strip()][:5]
+    if status == "ready":
+        questions = []
+
+    notes = parsed.get("project_notes") if isinstance(parsed.get("project_notes"), dict) else {}
+    if notes:
+        session["project_notes"] = notes
+    else:
+        session["project_notes"].setdefault("core_concept", session["initial_prompt"])
+
+    # Negatif NPC kısıtlamasını keşif aşamasında bile preview listesine yansıt
+    preview_active = parsed.get("preview_active_agents") if isinstance(parsed.get("preview_active_agents"), list) else []
+    preview_skipped = parsed.get("preview_skipped_agents") if isinstance(parsed.get("preview_skipped_agents"), dict) else {}
+    if V7.user_forbids_npc(user_msg + " " + session["initial_prompt"], session["project_notes"]):
+        preview_active = [x for x in preview_active if x != "agent_ai_npc"]
+        preview_skipped["agent_ai_npc"] = "Kullanıcı kısıtlaması (NPC istenmedi)"
+
+    assistant_msg = str(parsed.get("assistant_message") or parsed.get("summary") or "Proje notları güncellendi.").strip()
+    session["conversation"].append({"role": "assistant", "content": assistant_msg + ("\n" + "\n".join(questions) if questions else "")})
+    DISCOVERY_SESSIONS[session_id] = session
+
+    LIVE_STATE["status"] = f"Keşif Tur {session['round']} ({status})"
+    LIVE_STATE["buffer"] = (
+        f"[🧭 Main Agent Keşif ({used_model}) — Tur {session['round']}]\n"
+        f"Durum: {status}\n"
+        f"Özet: {assistant_msg}\n\n"
+        + ("Sorular:\n" + "\n".join(questions) + "\n\n" if questions else "")
+        + "PROJECT_NOTES:\n" + json.dumps(session["project_notes"], ensure_ascii=False, indent=2)
+    )
+
+    return {
+        "session_id": session_id,
+        "round": session["round"],
+        "status": status,
+        "model": used_model,
+        "summary": str(parsed.get("summary") or assistant_msg),
+        "assistant_message": assistant_msg,
+        "questions": questions,
+        "project_notes": session["project_notes"],
+        "conversation": session["conversation"],
+        "preview_active_agents": preview_active,
+        "preview_skipped_agents": preview_skipped,
+    }
+
+
+# =====================================================================
+# ADIM B: SEÇİCİ YÖNLENDİRME + 4 FAZLI 13 ALT AGENT BORU HATTI
+# =====================================================================
+async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
+    cfg = await get_fresh_config()
+    agents_cfg = cfg["agents"]
+
+    conn = get_db()
     mem_records = conn.execute("SELECT prompt, ai_summary FROM memory_logs WHERE user_id = ? ORDER BY id DESC LIMIT 4", (user["id"],)).fetchall()
     conn.close()
 
@@ -1401,40 +1794,65 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     raw_tm = payload.get("thinking_mode", False)
     thinking_mode = raw_tm if isinstance(raw_tm, bool) else str(raw_tm).strip().lower() in ("true", "1", "yes", "on")
     directives_cfg = payload.get("directives", {})
-    active_directives = build_dynamic_directives(payload.get("prompt", ""), directives_cfg)
+    prompt_text = str(payload.get("prompt") or "").strip()
+    active_directives = build_dynamic_directives(prompt_text, directives_cfg)
     rig_type_hints = build_rig_type_hints(payload)
-    if rig_type_hints:
-        active_directives = rig_type_hints + active_directives
+
+    session_id = str(payload.get("session_id") or "").strip()
+    session_data = DISCOVERY_SESSIONS.get(session_id) if session_id else None
+    project_notes = payload.get("project_notes") if isinstance(payload.get("project_notes"), dict) else {}
+    if not project_notes and session_data:
+        project_notes = dict(session_data.get("project_notes") or {})
+    discovery_conv = payload.get("discovery_conversation") if isinstance(payload.get("discovery_conversation"), list) else (
+        session_data.get("conversation", []) if session_data else []
+    )
+    if session_data and session_data.get("initial_prompt") and session_data["initial_prompt"] not in prompt_text:
+        prompt_text = f"{session_data['initial_prompt']}\n\n[Keşif Yanıtları]:\n{prompt_text}" if prompt_text else session_data["initial_prompt"]
 
     mode_instruction = (
-        "\n[DERİN DÜŞÜNME MODU AÇIK]: Karmaşık mimariyi, fizik/animasyon zamanlamalarını ve tüm kenar durumlarını adım adım planlayarak eksiksiz üret."
+        "[DERİN DÜŞÜNME MODU AÇIK]: Mimariyi, isim sözleşmelerini, fizik/animasyon zamanlamalarını ve tüm kenar durumlarını eksiksiz planlayarak üret."
         if thinking_mode else
-        "\n[HIZLI MOD AÇIK]: Gereksiz uzun düşünme yapmadan doğrudan en temiz, hızlı ve çalışan JSON aksiyonlarını üret."
+        "[HIZLI MOD AÇIK]: Gereksiz uzatmadan doğrudan en temiz, çalışan JSON aksiyonlarını ve manifest güncellemelerini üret."
     )
 
-    enriched_payload = {
-        "KULLANICI_KOMUTU": payload.get("prompt", ""),
-        "ACTIVE_QUALITY_DIRECTIVES": active_directives,
-        "GECMIS_HAFIZA": memory_list,
-        "YENI_GOREV": payload
-    }
-
-    if not cfg["venice_key"]:
+    if not cfg.get("venice_key"):
         TASKS[task_id] = {"status": "failed", "error": "Yönetici henüz Venice API anahtarını girmemiş."}
         return
 
-    LIVE_STATE["status"] = f"{user['username']} ({'Derin' if thinking_mode else 'Hızlı'} Mod) üretiliyor..."
-    LIVE_STATE["buffer"] = ""
-
-    base_sys = cfg["system_prompt"] + mode_instruction
-    user_json_str = json.dumps(enriched_payload, ensure_ascii=False)[:120000]
     is_syntax_repair = bool(payload.get("is_syntax_repair", False))
-    prompt_text = payload.get("prompt", "")
+    scene_compact = V6.compact_scene(payload.get("scene_hierarchy", {}))
 
-    # V6: her aşamada SADECE izinli araçlar (sunucu tarafı filtre)
-    STAGE1_ALLOWED = {"create_instance", "edit_instance", "delete_instance", "insert_asset", "terrain_fill", "run_luau", "set_camera", "spawn_rig"}
-    STAGE2_ALLOWED = {"create_animation", "setup_camera"}
-    STAGE3_ALLOWED = {"write_script", "edit_script", "delete_instance", "create_instance"}
+    # 14 Agent Canlı Boru Hattı Durumu
+    pipeline: list[dict] = [
+        {
+            "id": a["id"],
+            "order": a["order"],
+            "phase": a["phase"],
+            "title": a["title"],
+            "short_name": a["short_name"],
+            "status": "pending",
+            "model": agents_cfg[a["id"]]["model"],
+            "reason": "",
+            "actions_count": 0,
+        }
+        for a in V7.AGENT_REGISTRY
+    ]
+    pipe_by_id = {p["id"]: p for p in pipeline}
+    handoffs: list[str] = []
+
+    def sync_live(detail_text: str = ""):
+        report = V7.format_pipeline_report(pipeline, handoffs, detail_text)
+        LIVE_STATE["pipeline"] = [dict(p) for p in pipeline]
+        LIVE_STATE["handoffs"] = list(handoffs)
+        if task_id in TASKS:
+            TASKS[task_id]["agent_pipeline"] = [dict(p) for p in pipeline]
+            TASKS[task_id]["handoff_logs"] = list(handoffs)
+            TASKS[task_id]["buffer"] = report
+        return report
+
+    LIVE_STATE["status"] = f"{user['username']} | V7 14-Agent Orkestrasyon başlıyor..."
+    LIVE_STATE["buffer"] = ""
+    sync_live("Main Agent başlatılıyor...")
 
     def summarize_actions(acts):
         out = []
@@ -1458,218 +1876,300 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         repaired_json = {}
 
         if is_syntax_repair:
+            repair_model = agents_cfg["agent_combat_skills"]["model"]
+            repair_sys = V7.build_subagent_system_prompt(
+                "agent_combat_skills",
+                agents_cfg["agent_combat_skills"]["prompt"],
+                mode_instruction,
+                ["SYNTAX ONARIMI MODU: Sadece sözdizimi hatalı scriptleri `write_script` / `edit_script` ile düzelt."],
+            )
             messages = [
-                {"role": "system", "content": V6.build_stage_prompt(3, cfg["system_prompt"], mode_instruction)},
-                {"role": "user", "content": user_json_str}
+                {"role": "system", "content": repair_sys},
+                {"role": "user", "content": json.dumps({
+                    "KULLANICI_KOMUTU": prompt_text,
+                    "SCENE_HIERARCHY": scene_compact,
+                    "SELECTED_ITEMS": payload.get("selected_items", []),
+                    "REQUESTED_FILES_CONTENT": payload.get("requested_files_content", {}),
+                }, ensure_ascii=False)[:100000]},
             ]
-            full_output = await stream_venice_call(cfg, messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Syntax Onarımı]")
+            full_output = await stream_venice_call(
+                cfg, messages, task_id, thinking_mode=thinking_mode,
+                stage_prefix="[Syntax Onarımı]", model_override=repair_model,
+            )
             total_out_tokens += estimate_tokens(full_output)
             repaired_json = extract_and_repair_json(full_output)
         else:
-            combined_actions = []
-            combined_thoughts = []
-            stage_summaries = []
-            scene_compact = V6.compact_scene(payload.get("scene_hierarchy", {}))
+            combined_actions: list[dict] = []
+            combined_thoughts: list[str] = []
+            agent_summaries: list[dict] = []
+            shared_manifest = V7.create_empty_manifest(str(project_notes.get("game_title") or ""))
 
-            # AŞAMA 0: OYUN PLANI (kısa müşteri promptunu somut plana çevirir)
-            blueprint = {}
-            if V6.needs_blueprint(prompt_text, payload):
-                LIVE_STATE["status"] = f"{user['username']} | Aşama 0: Oyun Planı..."
-                try:
-                    bp_messages = [
-                        {"role": "system", "content": V6.BLUEPRINT_PROMPT},
-                        {"role": "user", "content": json.dumps({
-                            "MUSTERI_ISTEGI": prompt_text,
-                            "SAHNEDE_OLANLAR": scene_compact,
-                            "GECMIS_HAFIZA": memory_list,
-                        }, ensure_ascii=False)[:40000]}
-                    ]
-                    bp_out = await stream_venice_call(cfg, bp_messages, task_id, thinking_mode=False, stage_prefix="[Aşama 0: Oyun Planı]")
-                    total_out_tokens += estimate_tokens(bp_out)
-                    bp_json = extract_and_repair_json(bp_out)
-                    if isinstance(bp_json, dict) and not bp_json.get("actions"):
-                        blueprint = {k: v for k, v in bp_json.items() if k not in ("actions", "need_files", "search_toolbox", "thought")}
-                    if blueprint.get("summary"):
-                        combined_thoughts.append("[0 Plan] " + str(blueprint.get("title", "")) + ": " + str(blueprint.get("summary")))
-                except Exception as bp_err:
-                    ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Blueprint Hatası", "details": str(bp_err)})
-                    blueprint = {}
+            # =========================================================
+            # FAZ 0: MAIN AGENT — SEÇİCİ YÖNLENDİRME & MANIFEST BAŞLATMA
+            # =========================================================
+            main_cfg = agents_cfg["main_agent"]
+            pipe_by_id["main_agent"]["status"] = "running"
+            LIVE_STATE["status"] = f"{user['username']} | Main Agent yönlendirme planı hazırlıyor..."
+            sync_live("Main Agent 13 alt agent arasından sadece gerekenleri seçiyor...")
 
-            # AŞAMA 1/3: DÜNYA, HARİTA, PROPLAR & KARAKTERLER
-            stage1_sys = V6.build_stage_prompt(1, cfg["system_prompt"], mode_instruction, active_directives)
-            LIVE_STATE["status"] = f"{user['username']} | Aşama 1/3: Dünya & Karakterler..."
-            s1_payload = {
+            route_sys = (
+                main_cfg["prompt"]
+                + "\n\n[AKTİF MOD: ROUTE (SEÇİCİ AGENT YÖNLENDİRME & SHARED_MANIFEST)]\n"
+                + "- 13 alt agent'tan YALNIZCA gerçekten gerekli olanlara `\"status\": \"ACTIVE\"` ve özel `task_input` ver; gereksiz veya kullanıcının reddettiği tüm agent'lara `\"status\": \"PASS\"` ve kısa `reason` yaz.\n"
+                + "- SADECE geçerli tek bir JSON objesi döndür (markdown/kod bloğu yok)."
+            )
+            route_payload = {
+                "MODE": "ROUTE",
                 "KULLANICI_KOMUTU": prompt_text,
-                "OYUN_PLANI": V6.blueprint_for_stage(blueprint, 1),
+                "PROJECT_NOTES": project_notes,
+                "DISCOVERY_CONVERSATION": discovery_conv[-8:],
+                "GECMIS_HAFIZA": memory_list,
+                "ACTIVE_QUALITY_DIRECTIVES": active_directives,
+                "AVAILABLE_13_SUBAGENTS": [
+                    {"id": a["id"], "order": a["order"], "phase": a["phase"], "title": a["title"], "description": a["description"], "allowed_actions": a["allowed_actions"]}
+                    for a in V7.SUB_AGENTS
+                ],
                 "SCENE_HIERARCHY": scene_compact,
                 "SELECTED_ITEMS": payload.get("selected_items", []),
-                "GECMIS_HAFIZA": memory_list,
             }
-            s1_messages = [
-                {"role": "system", "content": stage1_sys},
-                {"role": "user", "content": json.dumps(s1_payload, ensure_ascii=False)[:100000]}
-            ]
-            s1_json = {}
-            for _turn in range(2):
-                s1_out = await stream_venice_call(cfg, s1_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 1/3: Dünya & Karakterler]")
-                total_out_tokens += estimate_tokens(s1_out)
-                s1_json = extract_and_repair_json(s1_out)
 
-                if s1_json.get("need_files"):
-                    repaired_json = s1_json
-                    break
+            route_out = await stream_venice_call(
+                cfg,
+                [
+                    {"role": "system", "content": route_sys},
+                    {"role": "user", "content": json.dumps(route_payload, ensure_ascii=False)[:90000]},
+                ],
+                task_id,
+                thinking_mode=thinking_mode,
+                stage_prefix=f"[0/13 Main Agent Yönlendirme — {main_cfg['model']}]",
+                model_override=main_cfg["model"],
+                buffer_builder=lambda tail: V7.format_pipeline_report(pipeline, handoffs, tail),
+            )
+            total_out_tokens += estimate_tokens(route_out)
+            route_json = extract_and_repair_json(route_out)
 
-                queries = s1_json.get("search_toolbox") or []
-                if queries and isinstance(queries, list) and _turn == 0:
-                    LIVE_STATE["status"] = f"Aşama 1/3 Toolbox aranıyor: {', '.join(map(str, queries[:4]))}"
-                    TASKS[task_id]["buffer"] = f"[Aşama 1/3] Roblox Toolbox'ta 3D modeller aranıyor: {', '.join(map(str, queries[:4]))}..."
-                    toolbox_results = {}
-                    for q in queries[:4]:
-                        toolbox_results[str(q)] = await search_roblox_toolbox(str(q), limit=6)
-                    s1_messages.append({"role": "assistant", "content": s1_out})
-                    s1_messages.append({
-                        "role": "user",
-                        "content": (
-                            "TOOLBOX_ARAMA_SONUCLARI:\n"
-                            + json.dumps(toolbox_results, ensure_ascii=False)
-                            + "\nNow pick suitable AssetIds and return the full STAGE 1 actions. Do not call search_toolbox again."
-                        )
-                    })
+            if isinstance(route_json.get("project_notes"), dict) and route_json["project_notes"]:
+                project_notes = {**project_notes, **route_json["project_notes"]}
+            if isinstance(route_json.get("shared_manifest"), dict):
+                shared_manifest = V7.merge_manifest(shared_manifest, route_json["shared_manifest"], "main_agent", [])
+
+            routing = V7.normalize_routing(route_json.get("routing"), prompt_text, project_notes)
+            pipe_by_id["main_agent"]["status"] = "done"
+
+            active_names = []
+            pass_names = []
+            for a in V7.SUB_AGENTS:
+                aid = a["id"]
+                dec = routing[aid]
+                if dec["status"] == "ACTIVE":
+                    pipe_by_id[aid]["status"] = "active"
+                    pipe_by_id[aid]["reason"] = dec["reason"]
+                    active_names.append(a["short_name"])
+                else:
+                    pipe_by_id[aid]["status"] = "pass"
+                    pipe_by_id[aid]["reason"] = dec["reason"]
+                    pass_names.append(a["short_name"])
+
+            handoffs.append(f"Main Agent → AKTİF ({len(active_names)}): {', '.join(active_names)}")
+            if pass_names:
+                handoffs.append(f"Main Agent → PASS ({len(pass_names)}): {', '.join(pass_names)}")
+            if route_json.get("thought"):
+                combined_thoughts.append("[Main Agent] " + str(route_json["thought"]))
+            sync_live("Seçici yönlendirme tamamlandı, Faz 1 başlatılıyor...")
+
+            # =========================================================
+            # FAZ 1 → FAZ 2 → FAZ 3 → FAZ 4 (ZORUNLU SIRAYLA 1..13)
+            # =========================================================
+            need_files_result = None
+            for meta in V7.SUB_AGENTS:
+                aid = meta["id"]
+                dec = routing[aid]
+                if dec["status"] != "ACTIVE":
                     continue
-                break
 
-            if not repaired_json.get("need_files"):
-                s1_actions = [a for a in (s1_json.get("actions") or []) if isinstance(a, dict) and a.get("type") in STAGE1_ALLOWED]
-                combined_actions.extend(s1_actions)
-                if s1_json.get("thought"):
-                    combined_thoughts.append("[1/3 Dünya] " + str(s1_json.get("thought")))
-                spawned_rigs = [
-                    {"name": a.get("name"), "path": f"{a.get('parent') or 'Workspace'}.{a.get('name')}", "rig_type": a.get("rig_type", "R15"), "behavior": a.get("behavior", "idle")}
-                    for a in s1_actions if a.get("type") == "spawn_rig"
-                ]
-                stage_summaries.append({
-                    "stage": "1_world_and_characters",
-                    "thought": s1_json.get("thought", ""),
-                    "spawned_rigs": spawned_rigs,
-                    "actions_summary": summarize_actions(s1_actions)[:120]
-                })
+                a_cfg = agents_cfg[aid]
+                a_model = a_cfg["model"]
+                allowed_set = set(meta["allowed_actions"])
+                pipe_by_id[aid]["status"] = "running"
+                pipe_by_id[aid]["model"] = a_model
+                LIVE_STATE["status"] = f"{user['username']} | Faz {meta['phase']} • {meta['title']} ({a_model})..."
 
-                # AŞAMA 2/3: ANİMASYONLAR, OYUN KAMERASI & POST-FX
-                s2_notes = list(rig_type_hints)
-                if spawned_rigs:
-                    s2_notes.append("Rigs spawned in stage 1 (walk/run/idle already automatic): " + ", ".join(f"{r['path']} ({r['rig_type']})" for r in spawned_rigs))
-                stage2_sys = V6.build_stage_prompt(2, cfg["system_prompt"], mode_instruction, s2_notes)
-                LIVE_STATE["status"] = f"{user['username']} | Aşama 2/3: Animasyonlar & Kamera..."
-                s2_payload = {
+                # Ajanlar arası zorunlu SHARED_MANIFEST veri aktarımları
+                extra_notes: list[str] = []
+                if cfg.get("system_prompt") and not V6.is_legacy_prompt(cfg["system_prompt"]):
+                    extra_notes.append("ADMIN EK KURALI: " + cfg["system_prompt"][:1500])
+
+                if aid in ("agent_animation", "agent_movement", "agent_combat_skills", "agent_ai_npc") and rig_type_hints:
+                    extra_notes.extend(rig_type_hints)
+
+                if aid in ("agent_movement", "agent_combat_skills", "agent_ai_npc") and shared_manifest.get("animations"):
+                    anim_list_str = ", ".join(
+                        (f"{x.get('name')} ({x.get('trigger') or x.get('preset') or 'action'})" if isinstance(x, dict) else str(x))
+                        for x in shared_manifest["animations"]
+                    )
+                    extra_notes.append(
+                        f"ZORUNLU AGENT 5 ANİMASYON AKTARIMI: Agent 5 şu animasyonları üretti -> [{anim_list_str}]. "
+                        "Bunları BİREBİR aynı isimlerle `AIKit.PlayAnim(target, \"TamIsim\")` üzerinden ilgili tuşlara/durumlara bağla!"
+                    )
+                    handoffs.append(f"Agent 5 (Animasyon) → {meta['title']}: {len(shared_manifest['animations'])} animasyon aktarıldı")
+
+                if aid in ("agent_movement", "agent_combat_skills", "agent_interaction", "agent_inventory", "agent_economy") and shared_manifest.get("ui_elements"):
+                    ui_preview = [
+                        (x.get("path") or x.get("name") if isinstance(x, dict) else str(x))
+                        for x in shared_manifest["ui_elements"][:30]
+                    ]
+                    extra_notes.append("ZORUNLU AGENT 6 UI AKTARIMI: Mevcut UI elemanları -> " + ", ".join(ui_preview) + ". `ScreenGui.Enabled = true` yap ve birebir aynı isimlerle güncelle.")
+                    handoffs.append(f"Agent 6 (UI/HUD) → {meta['title']}: {len(shared_manifest['ui_elements'])} UI elemanı aktarıldı")
+
+                if aid in ("agent_combat_skills", "agent_movement") and shared_manifest.get("vfx"):
+                    vfx_preview = [
+                        (x.get("path") or x.get("name") if isinstance(x, dict) else str(x))
+                        for x in shared_manifest["vfx"][:20]
+                    ]
+                    extra_notes.append("AGENT 4 VFX ŞABLONLARI: " + ", ".join(vfx_preview))
+                    handoffs.append(f"Agent 4 (VFX) → {meta['title']}: {len(shared_manifest['vfx'])} VFX şablonu aktarıldı")
+
+                if aid == "agent_camera" and project_notes.get("camera_preference"):
+                    extra_notes.append(f"KULLANICI KAMERA TERCİHİ: {project_notes['camera_preference']}")
+
+                sync_live(f"{meta['title']} çalışıyor ({a_model})...")
+
+                sub_sys = V7.build_subagent_system_prompt(aid, a_cfg["prompt"], mode_instruction, extra_notes)
+                sub_payload = {
+                    "AGENT_ID": aid,
+                    "AGENT_ROLE": meta["title"],
+                    "GOREV_EMRI": dec["task_input"] or prompt_text,
                     "KULLANICI_KOMUTU": prompt_text,
-                    "OYUN_PLANI": V6.blueprint_for_stage(blueprint, 2),
-                    "ASAMA_1": stage_summaries[0],
-                    "SCENE_HIERARCHY": scene_compact,
-                    "SELECTED_ITEMS": payload.get("selected_items", [])
-                }
-                s2_messages = [
-                    {"role": "system", "content": stage2_sys},
-                    {"role": "user", "content": json.dumps(s2_payload, ensure_ascii=False)[:100000]}
-                ]
-                s2_out = await stream_venice_call(cfg, s2_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 2/3: Animasyonlar & Kamera]")
-                total_out_tokens += estimate_tokens(s2_out)
-                s2_json = extract_and_repair_json(s2_out)
-                s2_actions = []
-                for a in (s2_json.get("actions") or []):
-                    if not isinstance(a, dict):
-                        continue
-                    t = a.get("type")
-                    if t not in STAGE2_ALLOWED:
-                        continue
-                    s2_actions.append(a)
-
-                # Güvenlik ağı: kullanıcı kamera istediyse ama model setup_camera üretmediyse otomatik ekle
-                p_low = (prompt_text or "").lower()
-                wants_cam = any(k in p_low for k in ["3. şahıs", "3.şahıs", "üçüncü şahıs", "third person", "3rd person", "tps", "omuz", "shoulder", "kamera takip", "follow cam"])
-                has_cam = any(a.get("type") in ("setup_camera", "create_cutscene") for a in s2_actions)
-                if wants_cam and not has_cam:
-                    s2_actions.append({"type": "setup_camera", "mode": "third_person", "distance": 11, "shoulder_offset": 2.2, "sprint": True})
-
-                combined_actions.extend(s2_actions)
-                if s2_json.get("thought"):
-                    combined_thoughts.append("[2/3 Animasyon & Kamera] " + str(s2_json.get("thought")))
-
-                created_anims = [
-                    {"name": a.get("name") or ("AI_" + str(a.get("preset"))), "preset": a.get("preset"), "rig_path": a.get("rig_path")}
-                    for a in s2_actions if a.get("type") == "create_animation"
-                ]
-                camera_setup = next((a for a in s2_actions if a.get("type") == "setup_camera"), None)
-                stage_summaries.append({
-                    "stage": "2_animations_and_camera",
-                    "thought": s2_json.get("thought", ""),
-                    "animations_in_ReplicatedStorage_AI_Animations": created_anims,
-                    "camera": summarize_actions([camera_setup])[0] if camera_setup else None,
-                    "actions_summary": summarize_actions(s2_actions)
-                })
-
-                # AŞAMA 3/3: OYNANIŞ SCRİPTLERİ & UI
-                s3_notes = list(active_directives) + list(rig_type_hints)
-                if created_anims:
-                    s3_notes.append("Animations available (play with AIKit.PlayAnim(model, name)): " + ", ".join(a["name"] for a in created_anims if a.get("name")))
-                if spawned_rigs:
-                    s3_notes.append("NPC rigs: " + ", ".join(r["path"] for r in spawned_rigs) + " — move them with Humanoid:MoveTo or AIKit.SetBehavior; animations are automatic.")
-                if camera_setup:
-                    s3_notes.append(f"Camera already handled by setup_camera (mode {camera_setup.get('mode')}). Do NOT write a camera script.")
-                stage3_sys = V6.build_stage_prompt(3, cfg["system_prompt"], mode_instruction, s3_notes)
-                LIVE_STATE["status"] = f"{user['username']} | Aşama 3/3: Oynanış Scriptleri & UI..."
-                s3_payload = {
-                    "KULLANICI_KOMUTU": prompt_text,
-                    "OYUN_PLANI": V6.blueprint_for_stage(blueprint, 3),
-                    "ONCEKI_ASAMALAR": stage_summaries,
-                    "GECMIS_HAFIZA": memory_list,
+                    "PROJECT_NOTES": project_notes,
+                    "SHARED_MANIFEST": shared_manifest,
+                    "ONCEKI_AGENT_OZETLERI": agent_summaries[-6:],
                     "SCENE_HIERARCHY": scene_compact,
                     "SELECTED_ITEMS": payload.get("selected_items", []),
-                    "PROJECT_INDEX": payload.get("project_shortened_index", []),
-                    "REQUESTED_FILES_CONTENT": payload.get("requested_files_content", {})
                 }
-                s3_messages = [
-                    {"role": "system", "content": stage3_sys},
-                    {"role": "user", "content": json.dumps(s3_payload, ensure_ascii=False)[:110000]}
+                if meta["phase"] in (3, 4):
+                    sub_payload["PROJECT_INDEX"] = payload.get("project_shortened_index", [])
+                    sub_payload["REQUESTED_FILES_CONTENT"] = payload.get("requested_files_content", {})
+                    sub_payload["GECMIS_HAFIZA"] = memory_list
+
+                sub_messages = [
+                    {"role": "system", "content": sub_sys},
+                    {"role": "user", "content": json.dumps(sub_payload, ensure_ascii=False)[:105000]},
                 ]
-                s3_out = await stream_venice_call(cfg, s3_messages, task_id, thinking_mode=thinking_mode, stage_prefix="[Aşama 3/3: Oynanış Scriptleri & UI]")
-                total_out_tokens += estimate_tokens(s3_out)
-                s3_json = extract_and_repair_json(s3_out)
-                if s3_json.get("need_files") and not combined_actions:
-                    repaired_json = s3_json
-                else:
-                    s3_actions = []
-                    for a in (s3_json.get("actions") or []):
+
+                try:
+                    sub_json = {}
+                    max_turns = 2 if aid in ("agent_architecture", "agent_environment") else 1
+                    for _turn in range(max_turns):
+                        sub_out = await stream_venice_call(
+                            cfg,
+                            sub_messages,
+                            task_id,
+                            thinking_mode=thinking_mode,
+                            stage_prefix=f"[Faz {meta['phase']} • {meta['title']} — {a_model}]",
+                            model_override=a_model,
+                            buffer_builder=lambda tail: V7.format_pipeline_report(pipeline, handoffs, tail),
+                        )
+                        total_out_tokens += estimate_tokens(sub_out)
+                        sub_json = extract_and_repair_json(sub_out)
+
+                        if sub_json.get("need_files") and not combined_actions:
+                            need_files_result = sub_json
+                            break
+
+                        queries = sub_json.get("search_toolbox") or []
+                        if queries and isinstance(queries, list) and _turn == 0 and max_turns == 2:
+                            LIVE_STATE["status"] = f"{meta['title']} Toolbox arıyor: {', '.join(map(str, queries[:4]))}"
+                            toolbox_results = {}
+                            for q in queries[:4]:
+                                toolbox_results[str(q)] = await search_roblox_toolbox(str(q), limit=6)
+                            sub_messages.append({"role": "assistant", "content": sub_out})
+                            sub_messages.append({
+                                "role": "user",
+                                "content": "TOOLBOX_ARAMA_SONUCLARI:\n" + json.dumps(toolbox_results, ensure_ascii=False) + "\nŞimdi uygun AssetId'leri seçip JSON aksiyonlarını ve manifest_updates alanını döndür. Tekrar search_toolbox çağırma.",
+                            })
+                            continue
+                        break
+
+                    if need_files_result:
+                        break
+
+                    filtered_actions = []
+                    for a in (sub_json.get("actions") or []):
                         if not isinstance(a, dict):
                             continue
                         t = a.get("type")
-                        if t == "fallback_code" and a.get("source"):
-                            a = {"type": "write_script", "script_type": "Script", "name": "AIGameplay", "parent": "ServerScriptService", "source": a["source"]}
+                        if t == "fallback_code" and a.get("source") and "write_script" in allowed_set:
+                            a = {"type": "write_script", "script_type": "Script", "name": f"{meta['short_name'].replace(' ', '')}Script", "parent": "ServerScriptService", "source": a["source"]}
                             t = "write_script"
-                        if t in STAGE3_ALLOWED:
-                            s3_actions.append(a)
-                    combined_actions.extend(s3_actions)
-                    if s3_json.get("thought"):
-                        combined_thoughts.append("[3/3 Kodlar] " + str(s3_json.get("thought")))
+                        if t in allowed_set:
+                            filtered_actions.append(a)
 
-                    # AIKit her zaman kurulu olsun (scriptler + evrensel dinamik kamera & FOV)
-                    is_scene_build = len(s1_actions) > 0 or bool(blueprint and blueprint.get("genre") != "edit")
-                    uses_kit = any("AIKit" in str(a.get("source", "")) for a in combined_actions)
-                    has_kit_action = any(a.get("type") in ("spawn_rig", "create_animation", "setup_camera", "install_kit") for a in combined_actions)
-                    if (uses_kit or is_scene_build) and not has_kit_action:
-                        combined_actions.insert(0, {"type": "install_kit"})
+                    combined_actions.extend(filtered_actions)
+                    shared_manifest = V7.merge_manifest(shared_manifest, sub_json.get("manifest_updates"), aid, filtered_actions)
 
-                    # Varsayılan Sinematik Atmosfer (gece/karanlık/korku/özel hava istenmediyse ve Lighting özelleştirilmediyse)
-                    has_custom_lighting = any(
-                        str(a.get("parent") or "") == "Lighting" or str(a.get("path") or "").startswith("Lighting")
-                        for a in combined_actions
-                    )
-                    if is_scene_build and not has_custom_lighting and not V6.wants_custom_atmosphere(prompt_text):
-                        combined_actions.insert(0, {"type": "setup_atmosphere"})
+                    pipe_by_id[aid]["status"] = "done"
+                    pipe_by_id[aid]["actions_count"] = len(filtered_actions)
 
-                    repaired_json = {
-                        "thought": "\n".join(combined_thoughts) if combined_thoughts else "3 aşamalı üretim tamamlandı.",
-                        "actions": combined_actions
-                    }
+                    if sub_json.get("thought"):
+                        combined_thoughts.append(f"[{meta['title']}] " + str(sub_json["thought"]))
+
+                    if aid == "agent_animation" and shared_manifest.get("animations"):
+                        anames = [x.get("name") if isinstance(x, dict) else str(x) for x in shared_manifest["animations"]]
+                        handoffs.append(f"Agent 5 (Animasyon) Manifeste Yazdı ({len(anames)}): {', '.join(anames[:15])}")
+                    elif aid == "agent_ui" and shared_manifest.get("ui_elements"):
+                        handoffs.append(f"Agent 6 (UI/HUD) Manifeste Yazdı: {len(shared_manifest['ui_elements'])} UI elemanı")
+                    elif aid == "agent_architecture" and shared_manifest.get("world_objects"):
+                        handoffs.append(f"Agent 1 (Mimari) Manifeste Yazdı: {len(shared_manifest['world_objects'])} sahne yapısı")
+
+                    agent_summaries.append({
+                        "agent": aid,
+                        "title": meta["title"],
+                        "thought": sub_json.get("thought", ""),
+                        "actions_summary": summarize_actions(filtered_actions)[:80],
+                    })
+                    sync_live(f"{meta['title']} tamamlandı ({len(filtered_actions)} aksiyon).")
+
+                except Exception as sub_err:
+                    pipe_by_id[aid]["status"] = "error"
+                    pipe_by_id[aid]["reason"] = str(sub_err)[:120]
+                    ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"{meta['title']} Hatası", "details": str(sub_err)})
+                    handoffs.append(f"⚠️ {meta['title']} hata aldı: {str(sub_err)[:80]}")
+                    sync_live(f"{meta['title']} hata aldı, sonraki faza geçiliyor...")
+
+            if need_files_result:
+                repaired_json = need_files_result
+            else:
+                # Güvenlik ağları: kamera, AIKit, varsayılan sinematik atmosfer
+                p_low = (prompt_text + " " + json.dumps(project_notes, ensure_ascii=False)).lower()
+                wants_cam = any(k in p_low for k in ["3. şahıs", "3.şahıs", "üçüncü şahıs", "third person", "3rd person", "tps", "omuz", "shoulder", "kamera takip", "follow cam"])
+                has_cam = any(a.get("type") in ("setup_camera", "create_cutscene") for a in combined_actions)
+                if wants_cam and not has_cam:
+                    wants_shoulder = any(k in p_low for k in ["omuz", "shoulder", "tps", "shooter"])
+                    combined_actions.append({"type": "setup_camera", "mode": "third_person", "distance": 11, "shoulder_offset": 2.0 if wants_shoulder else 0, "sprint": True})
+
+                is_scene_build = pipe_by_id["agent_architecture"]["actions_count"] > 0 or len(combined_actions) > 0
+                uses_kit = any("AIKit" in str(a.get("source", "")) for a in combined_actions)
+                has_kit_action = any(a.get("type") in ("spawn_rig", "create_animation", "setup_camera", "install_kit") for a in combined_actions)
+                if (uses_kit or is_scene_build) and not has_kit_action:
+                    combined_actions.insert(0, {"type": "install_kit"})
+
+                has_custom_lighting = any(
+                    a.get("type") == "setup_atmosphere"
+                    or str(a.get("parent") or "") == "Lighting"
+                    or str(a.get("path") or "").startswith("Lighting")
+                    for a in combined_actions
+                )
+                if is_scene_build and not has_custom_lighting and not V6.wants_custom_atmosphere(p_low):
+                    combined_actions.insert(0, {"type": "setup_atmosphere"})
+
+                repaired_json = {
+                    "thought": "\n".join(combined_thoughts) if combined_thoughts else "V7 14-Agent üretimi tamamlandı.",
+                    "actions": combined_actions,
+                    "agent_pipeline": pipeline,
+                    "handoff_logs": handoffs,
+                    "shared_manifest": shared_manifest,
+                    "project_notes": project_notes,
+                }
 
         if user["role"] != "admin":
             total_cost = int((raw_in_tokens * cfg["input_cost_mult"]) + (total_out_tokens * cfg["output_cost_mult"]))
@@ -1681,13 +2181,13 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
         actions = repaired_json.get("actions", [])
 
         if not repaired_json.get("need_files") and not payload.get("is_syntax_repair", False):
-            act_descs = [f"{a.get('type')}: {a.get('name') or a.get('path') or a.get('asset_id') or 'nesne'}" for a in actions]
+            act_descs = [f"{a.get('type')}: {a.get('name') or a.get('path') or a.get('asset_id') or 'nesne'}" for a in actions[:40]]
             ai_summary = repaired_json.get("thought", "Düzenlemeler yapıldı.")
             if act_descs:
                 ai_summary += " (Değişenler: " + ", ".join(act_descs) + ")"
 
             conn = get_db()
-            conn.execute("INSERT INTO memory_logs (user_id, prompt, ai_summary) VALUES (?, ?, ?)", (user["id"], payload.get("prompt", "")[:500], ai_summary[:1000]))
+            conn.execute("INSERT INTO memory_logs (user_id, prompt, ai_summary) VALUES (?, ?, ?)", (user["id"], prompt_text[:500], ai_summary[:1000]))
             conn.commit()
             conn.close()
 
@@ -1701,14 +2201,28 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             else:
                 repaired_json["actions"] = [{"type": "write_script", "script_type": "Script", "name": "AIGenerated", "parent": "ServerScriptService", "source": actions[0]["source"]}]
 
+        final_report = sync_live("Üretim tamamlandı! Aksiyonlar Roblox Studio'ya aktarılıyor...")
         LIVE_STATE["status"] = "Tamamlandı"
-        TASKS[task_id] = {"status": "completed", "result": repaired_json}
+        TASKS[task_id] = {
+            "status": "completed",
+            "result": repaired_json,
+            "agent_pipeline": pipeline,
+            "handoff_logs": handoffs,
+            "buffer": final_report,
+        }
 
     except Exception as e:
-        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Stream Hatası", "details": str(e)})
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "V7 Orkestrasyon Hatası", "details": str(e)})
         LIVE_STATE["status"] = "Hata"
-        TASKS[task_id] = {"status": "failed", "error": str(e)}
+        TASKS[task_id] = {
+            "status": "failed",
+            "error": str(e),
+            "agent_pipeline": pipeline,
+            "handoff_logs": handoffs,
+        }
 
+
+@app.post("/agent/execute")
 @app.post("/api/agent/execute")
 async def execute_task(request: Request, client_key: str = Header(None)):
     user = get_user_by_auth(client_key=client_key)
@@ -1719,10 +2233,12 @@ async def execute_task(request: Request, client_key: str = Header(None)):
         return JSONResponse({"error": "Yetersiz kredi (Token)."}, status_code=402)
 
     task_id = str(uuid.uuid4())
-    TASKS[task_id] = {"status": "processing", "buffer": "Bağlanılıyor..."}
+    TASKS[task_id] = {"status": "processing", "buffer": "V7 14-Agent Orkestratör başlatılıyor...", "agent_pipeline": [], "handoff_logs": []}
     asyncio.create_task(process_task(task_id, user, payload, raw_in_tokens))
     return {"task_id": task_id, "role": user["role"], "username": user["username"]}
 
+
+@app.get("/agent/poll")
 @app.get("/api/agent/poll")
 async def poll_task(task_id: str, client_key: str = Header(None)):
     user = get_user_by_auth(client_key=client_key)
@@ -1732,7 +2248,9 @@ async def poll_task(task_id: str, client_key: str = Header(None)):
     res["remaining_tokens"] = "Sınırsız" if user["role"] == "admin" else user["tokens"]
     return res
 
+
 EXPANDER_MODEL = os.environ.get("EXPANDER_MODEL", "claude-haiku-5-5").strip() or "claude-haiku-5-5"
+
 
 @app.post("/expand-prompt")
 async def expand_prompt_endpoint(request: Request, client_key: str = Header(None)):
@@ -1742,68 +2260,27 @@ async def expand_prompt_endpoint(request: Request, client_key: str = Header(None
     if not raw_prompt:
         return JSONResponse({"error": "Boş prompt genişletilemez."}, status_code=400)
 
-    conn = get_db()
-    cfg = dict(conn.execute("SELECT * FROM config WHERE id=1").fetchone())
-    conn.close()
-
+    cfg = await get_fresh_config()
     if not cfg.get("venice_key"):
         return JSONResponse({"error": "Yönetici henüz Venice API anahtarını girmemiş."}, status_code=400)
 
-    headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
     expander_sys_prompt = (cfg.get("expander_prompt") or "").strip() or V6.EXPANDER_PROMPT
-    messages = [
-        {"role": "system", "content": expander_sys_prompt},
-        {"role": "user", "content": raw_prompt},
-    ]
-
     primary_model = (cfg.get("expander_model") or "").strip() or os.environ.get("EXPANDER_MODEL", EXPANDER_MODEL).strip() or "claude-haiku-5-5"
-    fallback_model = cfg.get("chat_model") or primary_model
-    models_to_try = [primary_model] if fallback_model == primary_model else [primary_model, fallback_model]
-
-    expanded_text = ""
-    used_model = primary_model
-    last_err = ""
-
     LIVE_STATE["status"] = f"{user['username']} | Prompt Zenginleştirici çalışıyor..."
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for mdl in models_to_try:
-            payloads = [
-                {
-                    "model": mdl,
-                    "max_tokens": 2048,
-                    "messages": messages,
-                    "reasoning": {"enabled": False},
-                    "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
-                },
-                {
-                    "model": mdl,
-                    "max_tokens": 2048,
-                    "messages": messages,
-                },
-            ]
-            for pld in payloads:
-                try:
-                    r = await client.post("https://api.venice.ai/api/v1/chat/completions", json=pld, headers=headers)
-                    if r.status_code == 200:
-                        data = r.json()
-                        msg = (data.get("choices") or [{}])[0].get("message") or {}
-                        content = str(msg.get("content") or "").strip()
-                        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-                        if content:
-                            expanded_text = content
-                            used_model = mdl
-                            break
-                    else:
-                        last_err = f"HTTP {r.status_code}: {r.text[:200]}"
-                except Exception as exc:
-                    last_err = str(exc)
-            if expanded_text:
-                break
 
-    if not expanded_text:
-        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Expander Hatası", "details": last_err or "Boş yanıt"})
-        return JSONResponse({"error": f"Prompt zenginleştirilemedi: {last_err or 'Boş yanıt'}", "expanded_prompt": raw_prompt}, status_code=502)
+    try:
+        expanded_text, used_model = await call_venice_json(
+            cfg,
+            [
+                {"role": "system", "content": expander_sys_prompt},
+                {"role": "user", "content": raw_prompt},
+            ],
+            model_name=primary_model,
+            max_tokens=2048,
+        )
+    except Exception as exc:
+        ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": "Expander Hatası", "details": str(exc)})
+        return JSONResponse({"error": f"Prompt zenginleştirilemedi: {exc}", "expanded_prompt": raw_prompt}, status_code=502)
 
     LIVE_STATE["buffer"] = f"[✨ Prompt Zenginleştirici ({used_model})]\n{expanded_text}"
     return {"expanded_prompt": expanded_text, "model": used_model}
-
