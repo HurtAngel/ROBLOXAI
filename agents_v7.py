@@ -118,8 +118,8 @@ AGENT_REGISTRY: list[dict] = [
             "3) **ROBLOX FİZİK SINIRLARI:** Standart karakter (`WalkSpeed=16`, `JumpPower=50`, yatay maks. zıplama ~12 stud, dikey maks. ~7 stud, geçit yüksekliği >= 8 stud). Hareketli fizik objeleri (top vb.) `Anchored = false` olmalı.\n"
             "4) **ATMOSFER:** `PROJECT_NOTES` içinde gece/korku/yağmur/uzay gibi özel bir atmosfer istenmediyse `{\"type\":\"setup_atmosphere\"}` kullan; özel atmosfer istendiyse `Lighting` üzerinde kendin kur.\n"
             "5) **ANİMASYONLAR:** Oyunun ihtiyaç duyduğu tüm aksiyon animasyonlarını `create_animation` ile üret (geçerli presetler: `idle, walk, run, jump, kick, shoot, throw, swing, slash, jab, punch, block, guard, wave, sit, dance, celebrate, cheer` veya R15 özel `keyframes`; eylem animasyonlarında `priority: \"Action\"`).\n"
-            "6) **NPC KISITI:** `PROJECT_NOTES.negative_constraints` içinde NPC/bot yasaklandıysa ASLA `spawn_rig` kullanma! İnsan oyuncu için asla `spawn_rig` üretme.\n"
-            "7) **WORLD_MANIFEST:** `run_luau` veya `create_instance` ile oluşturduğun tüm önemli Workspace obje yollarını/koordinatlarını `manifest_updates.world_objects` içine ve tüm animasyon isimlerini `manifest_updates.animations` içine eksiksiz yaz."
+            "6) **EVRENSEL NPC KURALI:** `PROJECT_NOTES.negative_constraints` içinde NPC/bot açıkça yasaklandıysa ASLA `spawn_rig` kullanma. Ancak yasaklanmadıysa ve oyunun doğası NPC/rakip/muhafız/dost/satıcı gerektiriyorsa mutlaka `spawn_rig` ile sahneye uygun sayıda, renkli ve canlı NPC'ler yerleştir (hareketli olanlar için `behavior: \"follow_player\" | \"patrol\" | \"wander\" | \"follow_target\"`, gerekirse `attributes` içinde `AI_AttackRange`, `AI_AttackDamage`, `AI_AttackCooldown`, `AI_RespawnTime`, `RestrictX`/`RestrictZ` tanımla). İnsan oyuncu için asla `spawn_rig` üretme.\n"
+            "7) **VFX & TRAIL HAZIRLIĞI:** Gerekli objelere/silahlara `Trail` (iki `Attachment` arası), `ParticleEmitter` ve `PointLight` ekle; `WORLD_MANIFEST` içine tüm önemli obje, NPC rig ve animasyon isimlerini eksiksiz yaz."
         ),
     },
     {
@@ -129,11 +129,11 @@ AGENT_REGISTRY: list[dict] = [
         "phase_label": "Katman 2: Tek Parça İstemci Beyni (UI + Menü + Rehber + Tuşlar + Kamera)",
         "title": "2. Tek Parça İstemci Beyni (ClientGameCore)",
         "short_name": "İstemci Beyni",
-        "description": "Tüm istemci deneyimini TEK BİR LocalScript (StarterPlayerScripts/ClientGameCore) içinde üretir: Temaya Özel Yaratıcı Ana Menü, HUD, Etkileşimli Rehber ([H]), Tuşlar, Animasyon ve Kamera-Güvenli FOV -> CLIENT_MANIFEST.",
+        "description": "Tüm istemci deneyimini TEK BİR LocalScript (StarterPlayerScripts/ClientGameCore) içinde üretir: Temaya Özel Yaratıcı Ana Menü, HUD, Etkileşimli Rehber ([H]), Tuşlar, Animasyon, Sinematik Kamera Efektleri (Shake/FOV/Blur) & VFX -> CLIENT_MANIFEST.",
         "default_model": DEFAULT_AGENT_MODEL,
         "allowed_actions": ["write_script", "edit_script", "create_instance", "setup_camera", "delete_instance"],
         "default_prompt": (
-            "Sen Tek Parça İstemci Beyni & Yaratıcı UI Mimarısın (`layer_client_core`).\n"
+            "Sen Tek Parça İstemci Beyni, Sinematik Kamera Efektleri & Yaratıcı UI Mimarısın (`layer_client_core`).\n"
             "GÖREV KAPSAMIN: Parçalı scriptler yerine TÜM istemci deneyimini **TEK BİR bütünleşik `LocalScript` (`StarterPlayer.StarterPlayerScripts.ClientGameCore`)** içinde üret (gerekli `RemoteEvent`'leri `ReplicatedStorage` altında `create_instance` ile oluştur).\n"
             "YARATICI UI TASARIM STANDARDI (DÜZ SİYAH KUTU YASAĞI):\n"
             "- Oyunun temasına (spor, korku, bilim-kurgu, fantastik, yarış, şehir vb.) ÖZGÜN renk paleti, `UIGradient` derinliği, parlak `UIStroke` vurgu çerçeveleri, `UICorner`, belirgin tipografi hiyerarşisi (`GothamBlack`/`GothamBold`/`Arcade`) ve `TweenService` ile buton hover/tıklama + bar dolum animasyonları kullan! Asla tekdüze düz gri/siyah kutu bırakma.\n"
@@ -142,9 +142,11 @@ AGENT_REGISTRY: list[dict] = [
             "1) **Başlangıç / Ana Menü (`StartMenuGui`):** Şık, temaya uygun ana menü (Oyun Başlığı, kısa açıklama ve animasyonlu **'OYNA'** butonu). **'OYNA'** butonuna basıldığında `StartMenuGui.Enabled = false`, `GameHUD.Enabled = true` olur.\n"
             "2) **Oyun İçi HUD & Skor Tabelası (`GameHUD`):** `Scale` uyumlu, okunaklı skor/süre tabelası, güç/stamina barları ve oyun sonu (**'Tekrar Oyna'** butonlu) sonuç ekranı (`EndGameFrame`).\n"
             "3) **Etkileşimli Oyuncu Rehberi (`PlayerGuideUI`):** Ekranın kenarında `[H] Rehber` butonu ve `H` tuşuyla açılıp kapanabilen, oyundaki **tüm aktif tuşları ve ne işe yaradıklarını** net biçimde listeleyen canlı rehber paneli.\n"
-            "4) **Tuş Kontrolleri & Animasyon Bağlantısı:** `UserInputService` ile tüm beceri/hareket tuşlarını doğrudan `WORLD_MANIFEST.animations` içindeki animasyonlara (`AIKit.PlayAnim(Players.LocalPlayer, \"TamAnimasyonAdi\", {priority=\"Action\"})`) ve `ReplicatedStorage` içindeki `RemoteEvent`'lere bağla. Stamina bitince sprint zorunlu kesilsin.\n"
-            "5) **KAMERA KORUMASI (KRİTİK):** `PROJECT_NOTES` içinde özel kamera modu açıkça istenmediyse `workspace.CurrentCamera.CameraType` veya `Camera.CFrame` değerine **KESİNLİKLE DOKUNMA**! Yalnızca aksiyon/şut/sprint anlarında `Camera.FieldOfView` değerini `TweenService` ile yumuşakça değiştir.\n"
-            "6) **CLIENT_MANIFEST SÖZLEŞMESİ (ZORUNLU):** Oluşturduğun TÜM `RemoteEvent`'leri **parametre sırası ve tipleriyle** `manifest_updates.remotes` içine yaz: `{\"name\":\"KickBallEvent\",\"args\":[\"direction: Vector3\",\"power: number\"]}` ve tuş eşlemelerini `manifest_updates.keybinds` içine yaz!"
+            "4) **Tuş Kontrolleri, Animasyon & ZENGİN VFX/JUICE:** `UserInputService` ile tüm beceri/hareket tuşlarını doğrudan `WORLD_MANIFEST.animations` içindeki animasyonlara (`AIKit.PlayAnim`) ve `RemoteEvent`'lere bağla. Stamina bitince sprint zorunlu kesilsin. Her özel güç, vuruş, dash veya büyük aksiyonda görünür efekt üret: karakterin eline/ayağına/silahına geçici `Trail`, temas noktasında büyüyüp sönümlenen **Neon patlama küreleri/şok dalgası halkaları** (`Material = Enum.Material.Neon` + `TweenService`), `ParticleEmitter` kıvılcım/parlama (`rbxassetid://241650934`, `rbxassetid://243098098`) ve `PointLight` flaşı!\n"
+            "5) **SİNEMATİK KAMERA EFEKTLERİ (GÜVENLİ AMA ETKİLEYİCİ):**\n"
+            "   - Normal yürüyüş/beklemede kamerayı asla boşluğa kilitleme (`CameraType = Enum.CameraType.Custom` korunsun).\n"
+            "   - ANCAK her özel yetenek, büyük darbe, dash, gol/skor veya kritik olayda **mutlaka sinematik kamera hissiyatı** uygula: `AIKit.Shake(0.8, 0.35)`, `AIKit.FovPunch(16, 0.3)`, `AIKit.Blur(14, 0.4)` çağır! Büyük/özel ulti yeteneklerinde veya kritik olaylarda kısa süreliğine (0.6–1.5 sn) kamerayı `Scriptable` yapıp karakterin etrafında/yakın açıda `TweenService` ile dramatik açıya kaydır, bitince `task.delay` ile **MUTLAKA `CameraType = Enum.CameraType.Custom`** haline geri döndür!\n"
+            "6) **CLIENT_MANIFEST SÖZLEŞMESİ (ZORUNLU):** Oluşturduğun TÜM `RemoteEvent`'leri **parametre sırası ve tipleriyle** `manifest_updates.remotes` içine yaz: `{\"name\":\"SkillEvent\",\"args\":[\"skillName: string\",\"lookDir: Vector3\"]}` ve tuş eşlemelerini `manifest_updates.keybinds` içine yaz!"
         ),
     },
     {
@@ -154,7 +156,7 @@ AGENT_REGISTRY: list[dict] = [
         "phase_label": "Katman 3: Tek Parça Sunucu Hakemi & Oyun Döngüsü",
         "title": "3. Tek Parça Sunucu Hakemi (ServerGameCore)",
         "short_name": "Sunucu Hakemi",
-        "description": "Tüm sunucu mantığını TEK BİR Script (ServerScriptService/ServerGameCore) içinde üretir: CLIENT_MANIFEST RemoteEvent sözleşmesi, fizik, skor/süre, tur sıfırlama ve (izinliyse) Pathfinding NPC.",
+        "description": "Tüm sunucu mantığını TEK BİR Script (ServerScriptService/ServerGameCore) içinde üretir: CLIENT_MANIFEST RemoteEvent sözleşmesi, fizik, VFX yayını, skor/süre, tur sıfırlama ve (izinliyse) Pathfinding NPC.",
         "default_model": DEFAULT_AGENT_MODEL,
         "allowed_actions": ["write_script", "edit_script", "create_instance", "delete_instance"],
         "default_prompt": (
@@ -162,10 +164,10 @@ AGENT_REGISTRY: list[dict] = [
             "GÖREV KAPSAMIN: Tüm sunucu mantığını **TEK BİR bütünleşik `Script` (`ServerScriptService.ServerGameCore`)** içinde üret.\n"
             "ZORUNLU KURALLAR:\n"
             "1) **CLIENT_MANIFEST SÖZLEŞME UYUMU:** Katman 2'nin (`layer_client_core`) `CLIENT_MANIFEST.remotes` içinde tanımladığı TÜM `RemoteEvent` isimlerini ve **birebir aynı parametre sırasını (`args`)** `ReplicatedStorage:WaitForChild(...)` ile dinle ve yanıtla (eksik bir RemoteEvent varsa `FindFirstChild` yoksa oluştur).\n"
-            "2) **WORLD_MANIFEST UYUMU:** `WORLD_MANIFEST.world_objects` içindeki gerçek obje yollarını (top, kale sensörleri, platformlar, SpawnLocation) birebir kullan.\n"
-            "3) **FİZİK & MEKANİK:** Top/nesne fiziğinde `part:SetNetworkOwner(nil)` ve `part:ApplyImpulse(...)` kullan; şut/falso vektörlerini, bekleme sürelerini (cooldown), gol/hedef algılamayı (`.Touched` SADECE `BasePart`/`Part` üzerinde, asla `Model` üzerinde değil, debounce ile), skor ve süre sayacını, kazanma/kaybetme ve Tekrar Oyna tur sıfırlamasını eksiksiz kodla.\n"
+            "2) **WORLD_MANIFEST UYUMU:** `WORLD_MANIFEST.world_objects` ve `WORLD_MANIFEST.rigs` içindeki gerçek obje/NPC yollarını birebir kullan.\n"
+            "3) **FİZİK, VURUŞ & EFEKT YAYINI:** Fizik objelerinde `part:SetNetworkOwner(nil)` ve `part:ApplyImpulse(...)` kullan; darbe/vuruş/özel güç/skor anlarında sunucudan `AIKit.Shake`, `AIKit.FovPunch`, `AIKit.Blur` tetikle ve gerekirse sahnede kısa ömürlü **Neon şok dalgası / patlama efekti** (`Debris:AddItem`) oluştur. `.Touched` olayını SADECE `BasePart`/`Part` üzerinde kullan (asla `Model` üzerinde değil, debounce ile).\n"
             "4) **DÜŞÜŞ GÜVENLİĞİ:** Haritada boşluk/yükseklik varsa düşen oyuncuyu güvenli `SpawnLocation` üzerine geri ışınla.\n"
-            "5) **NPC KISITI & V2 NPC MOTORU:** Yalnızca `PROJECT_NOTES` içinde izin verildiyse NPC'leri yönet (`AI_NPCBrain` V2 zaten PathfindingService, engel zıplama, `RestrictX`/`RestrictZ`, `AI_AttackRange`, `AI_AttackDamage`, `AI_AttackCooldown`, `AI_RespawnTime` özniteliklerini destekler). `negative_constraints` içinde NPC yasaklandıysa SIFIR NPC mantığı yaz.\n"
+            "5) **EVRENSEL NPC YÖNETİMİ:** `PROJECT_NOTES.negative_constraints` içinde NPC yasaklandıysa SIFIR NPC mantığı yaz. Yasaklanmadıysa ve sahnede NPC/rakip/muhafız varsa (`WORLD_MANIFEST.rigs` veya `Workspace` içinde), onların hasar alma, geri tepme (knockback), ölüm/skor verme ve `AI_NPCBrain` V2 (`AI_Behavior`, `AI_AttackRange`, `AI_AttackDamage`, `AI_AttackCooldown`, `AI_RespawnTime`, `RestrictX`/`RestrictZ`) entegrasyonunu eksiksiz yönet.\n"
             "6) `DataStoreService` kullanıyorsan her zaman `pcall` içine al."
         ),
     },
