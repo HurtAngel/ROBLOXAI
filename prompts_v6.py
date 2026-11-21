@@ -174,3 +174,21 @@ def compact_scene(scene: dict, limit: int = 30000) -> dict | str:
     if len(s) <= limit:
         return scene or {}
     return s[:limit] + "...(truncated)"
+
+
+_CUSTOM_ATMO_WORDS = (
+    "gece", "night", "karanlık", "karanlik", "dark", "korku", "horror",
+    "yağmur", "yagmur", "rain", "fırtına", "firtina", "storm", "sis", "sisli", "fog", "foggy",
+    "kar", "karlı", "karli", "snow", "kış", "kis", "winter", "uzay", "space",
+    "cehennem", "hell", "gün batımı", "gun batimi", "sunset", "şafak", "safak", "dawn",
+    "akşam", "aksam", "evening", "alacakaranlık", "twilight", "midnight", "gece yarısı",
+    "neon", "cyberpunk", "mağara", "magara", "cave", "zindan", "dungeon",
+    "su altı", "su alti", "underwater", "kum fırtınası", "sandstorm",
+    "kıyamet", "kiyamet", "apocalypse", "zombi", "zombie", "bulutlu", "cloudy", "overcast",
+)
+
+
+def wants_custom_atmosphere(prompt_text: str) -> bool:
+    p = (prompt_text or "").lower()
+    return any(w in p for w in _CUSTOM_ATMO_WORDS)
+

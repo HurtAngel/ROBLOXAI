@@ -1625,11 +1625,20 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     if s3_json.get("thought"):
                         combined_thoughts.append("[3/3 Kodlar] " + str(s3_json.get("thought")))
 
-                    # AIKit her zaman kurulu olsun (scriptler require ediyor)
+                    # AIKit her zaman kurulu olsun (scriptler + evrensel dinamik kamera & FOV)
+                    is_scene_build = len(s1_actions) > 0 or bool(blueprint and blueprint.get("genre") != "edit")
                     uses_kit = any("AIKit" in str(a.get("source", "")) for a in combined_actions)
-                    has_kit_action = any(a.get("type") in ("spawn_rig", "create_animation", "setup_camera") for a in combined_actions)
-                    if uses_kit and not has_kit_action:
+                    has_kit_action = any(a.get("type") in ("spawn_rig", "create_animation", "setup_camera", "install_kit") for a in combined_actions)
+                    if (uses_kit or is_scene_build) and not has_kit_action:
                         combined_actions.insert(0, {"type": "install_kit"})
+
+                    # Varsayılan Sinematik Atmosfer (gece/karanlık/korku/özel hava istenmediyse ve Lighting özelleştirilmediyse)
+                    has_custom_lighting = any(
+                        str(a.get("parent") or "") == "Lighting" or str(a.get("path") or "").startswith("Lighting")
+                        for a in combined_actions
+                    )
+                    if is_scene_build and not has_custom_lighting and not V6.wants_custom_atmosphere(prompt_text):
+                        combined_actions.insert(0, {"type": "setup_atmosphere"})
 
                     repaired_json = {
                         "thought": "\n".join(combined_thoughts) if combined_thoughts else "3 aşamalı üretim tamamlandı.",
