@@ -1386,6 +1386,15 @@ async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_m
                 break
     return "".join(collected)
 
+def mask_system_prompt_tools(sys_prompt: str, forbidden_types: set[str]) -> str:
+    """Physically strips forbidden action schema lines from the system prompt so the model never sees them."""
+    kept = []
+    for line in (sys_prompt or "").splitlines():
+        if any(f'"type": "{ft}"' in line or f"'type': '{ft}'" in line for ft in forbidden_types):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
 def build_rig_type_hints(payload: dict) -> list[str]:
     hints = []
     seen = set()
