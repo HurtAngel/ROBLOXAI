@@ -1275,39 +1275,70 @@ async def log_err(request: Request):
 # --- ASENKRON ANA AJAN MOTORU (DÜŞÜNME MODU + DİNAMİK KURAL + TOOLBOX DÖNGÜSÜ) ---
 async def stream_venice_call(cfg: dict, messages: list, task_id: str, thinking_mode: bool = False) -> str:
     headers = {"Authorization": f"Bearer {cfg['venice_key']}", "Content-Type": "application/json"}
-    venice_payload = {
+    base_payload = {
         "model": cfg["chat_model"],
         "stream": True,
         "max_tokens": 16384,
         "messages": messages
     }
-    if not thinking_mode:
-        venice_payload["venice_parameters"] = {"strip_thinking_response": True}
+
+    if thinking_mode:
+        candidate_payloads = [base_payload]
+    else:
+        # Try hard-disabling reasoning first; fall back cleanly for models that reject reasoning.enabled=false
+        p1 = {
+            **base_payload,
+            "reasoning": {"enabled": False},
+            "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+        }
+        p2 = {
+            **base_payload,
+            "reasoning_effort": "low",
+            "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+        }
+        p3 = {
+            **base_payload,
+            "venice_parameters": {"disable_thinking": True, "strip_thinking_response": True},
+        }
+        candidate_payloads = [p1, p2, p3]
 
     collected = []
+    reasoning_collected = []
     async with httpx.AsyncClient() as client:
-        async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
-            if response.status_code != 200:
-                err_txt = (await response.aread()).decode("utf-8", errors="ignore")
-                ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"Venice HTTP {response.status_code}", "details": err_txt})
-                raise RuntimeError(f"API Hatası ({response.status_code})")
-
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
+        for idx, venice_payload in enumerate(candidate_payloads):
+            async with client.stream("POST", "https://api.venice.ai/api/v1/chat/completions", json=venice_payload, headers=headers, timeout=180.0) as response:
+                if response.status_code == 400 and idx < len(candidate_payloads) - 1:
+                    await response.aread()
                     continue
-                data_str = line[6:].strip()
-                if data_str == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                    content = chunk["choices"][0].get("delta", {}).get("content", "")
-                    if content:
-                        collected.append(content)
-                        buf = "".join(collected)[-2500:]
-                        TASKS[task_id]["buffer"] = buf
-                        LIVE_STATE["buffer"] = buf
-                except Exception:
-                    pass
+                if response.status_code != 200:
+                    err_txt = (await response.aread()).decode("utf-8", errors="ignore")
+                    ERROR_LOGS.append({"time": time.strftime("%H:%M:%S"), "type": f"Venice HTTP {response.status_code}", "details": err_txt})
+                    raise RuntimeError(f"API Hatası ({response.status_code})")
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0].get("delta", {})
+                        content = delta.get("content") or ""
+                        reasoning_piece = delta.get("reasoning_content") or ""
+                        if content:
+                            collected.append(content)
+                            buf = "".join(collected)[-2500:]
+                            TASKS[task_id]["buffer"] = buf
+                            LIVE_STATE["buffer"] = buf
+                        elif reasoning_piece and not collected:
+                            reasoning_collected.append(reasoning_piece)
+                            rbuf = "[Düşünüyor...] " + "".join(reasoning_collected)[-1500:]
+                            TASKS[task_id]["buffer"] = rbuf
+                            LIVE_STATE["buffer"] = rbuf
+                    except Exception:
+                        pass
+                break
     return "".join(collected)
 
 async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: int):
@@ -1319,7 +1350,8 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
     conn.close()
 
     memory_list = [{"Kullanıcı_Talebi": r["prompt"], "Yaptığın_Düzenlemeler": r["ai_summary"]} for r in reversed(mem_records)]
-    thinking_mode = bool(payload.get("thinking_mode", False))
+    raw_tm = payload.get("thinking_mode", False)
+    thinking_mode = raw_tm if isinstance(raw_tm, bool) else str(raw_tm).strip().lower() in ("true", "1", "yes", "on")
     directives_cfg = payload.get("directives", {})
     active_directives = build_dynamic_directives(payload.get("prompt", ""), directives_cfg)
 
