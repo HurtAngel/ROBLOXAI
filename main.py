@@ -289,17 +289,18 @@ def build_dynamic_directives(prompt_text: str, directives_cfg: dict) -> list[str
     rules = []
     if req_rig:
         rules.append(
-            "[RESMİ ROBLOX RIG & ANIMATION EDITOR KURALI]: İnsansı bir karakter, NPC, Dummy veya Boss oluştururken "
+            "[RESMİ ROBLOX RIG, RENKLENDİRME & ANCHORED KURALI]: İnsansı bir karakter, NPC, Dummy veya Boss oluştururken "
             "ASLA sıfırdan ham Part/blok birleştirerek karakter yapma! "
-            "Bunun yerine `run_luau` aksiyonu ile mutlaka Roblox'un resmi R15/R6 rig üreticisini kullan:\n"
+            "Bunun yerine `run_luau` aksiyonu ile mutlaka Roblox'un resmi R15/R6 rig üreticisini kullan ve çağırmadan önce `HumanoidDescription` renklerini mutlaka ata (yoksa NPC simsiyah çıkar):\n"
             "local Players = game:GetService('Players'); "
             "local desc = Instance.new('HumanoidDescription'); "
+            "desc.HeadColor = Color3.fromRGB(245, 205, 165); desc.LeftArmColor = desc.HeadColor; desc.RightArmColor = desc.HeadColor; "
+            "desc.TorsoColor = Color3.fromRGB(52, 110, 210); desc.LeftLegColor = Color3.fromRGB(45, 50, 62); desc.RightLegColor = desc.LeftLegColor; "
             "local rig = Players:CreateHumanoidModelFromDescription(desc, Enum.HumanoidRigType.R15) -- (R6 istenirse R6); "
             "rig.Name = 'RigAdi'; rig.Parent = workspace; rig:PivotTo(CFrame.new(0, 5, 0)); "
-            "for _, p in ipairs(rig:GetDescendants()) do if p:IsA('BasePart') then p.Anchored = (p.Name == 'HumanoidRootPart') end end\n"
-            "KRİTİK: Roblox Studio Animation Editor'ın rigi hareket ettirebilmesi için SADECE `HumanoidRootPart.Anchored = true` olmalı, "
-            "tüm diğer uzuv parçaları `Anchored = false` olmalı ve eklemler `Motor6D` ile bağlı kalmalıdır. "
-            "ASLA `run_luau` içinde elle `KeyframeSequence`/`Pose` yazma — animasyonları SADECE `create_animation` aksiyonu ile `\"rig_path\": \"Workspace.RigAdi\"` vererek üret ki doğrudan `RigAdi.AnimSaves` içine kaydedilip Studio Animation Editor'dan açılabilsin."
+            "for _, p in ipairs(rig:GetDescendants()) do if p:IsA('BasePart') then p.Anchored = false end end\n"
+            "KRİTİK ANCHORED YASAĞI: Yürümesi veya hareket etmesi istenen karakter/NPC riglerinde `HumanoidRootPart` DAHİL hiçbir parça `Anchored = true` YAPILMAYACAK (yalnızca tamamen hareketsiz heykel/manken ise sadece `HumanoidRootPart.Anchored = true` yapılabilir). "
+            "ASLA `run_luau` içinde elle `KeyframeSequence`/`Pose` yazma — animasyonları SADECE `create_animation` aksiyonu ile `\"rig_path\": \"Workspace.RigAdi\"` vererek üret."
         )
     if req_anim:
         rules.append(
@@ -1479,11 +1480,13 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             stage_summaries = []
 
             # AŞAMA 1/3: YAPILAR, SAHNE & RESMİ ROBLOX RİGLERİ
-            stage1_sys = base_sys + (
+            s1_base = mask_system_prompt_tools(base_sys, {"write_script", "edit_script", "create_animation", "create_cutscene", "create_plugin"})
+            stage1_sys = s1_base + (
                 "\n\n[AŞAMA 1/3 - TOOL MASKING: SADECE YAPILAR, 3D SAHNE & RESMİ RİGLER]:\n"
                 "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `create_instance`, `edit_instance`, `delete_instance`, `insert_asset`, `terrain_fill`, `run_luau`, `set_camera`.\n"
-                "- YASAKLI ARAÇLAR (BU AŞAMADA KULLANILAMAZ / SİLİNİR): `write_script`, `edit_script`, `create_animation`, `create_cutscene`.\n"
-                "- İnsansı karakter/NPC/Boss için ASLA sıfırdan ham Part birleştirme! Mutlaka `run_luau` ile `Players:CreateHumanoidModelFromDescription(Instance.new('HumanoidDescription'), Enum.HumanoidRigType.R15)` (veya R6) kullan, SADECE `HumanoidRootPart.Anchored = true` yap, tüm diğer uzuvları `Anchored = false` bırak.\n"
+                "- YASAKLI ARAÇLAR (BU AŞAMADA GİZLİ / SİLİNİR): `write_script`, `edit_script`, `create_animation`, `create_cutscene`.\n"
+                "- İnsansı karakter/NPC/Boss için ASLA sıfırdan ham Part birleştirme! `CreateHumanoidModelFromDescription` çağırmadan önce `HumanoidDescription` ten/kıyafet renklerini (`HeadColor`, `TorsoColor`, `LeftArmColor`, `RightArmColor`, `LeftLegColor`, `RightLegColor`) mutlaka ata ki NPC simsiyah çıkmasın.\n"
+                "- Yürüyen/hareket eden NPC'lerde `HumanoidRootPart` DAHİL hiçbir parça `Anchored = true` YAPILMAYACAK (tüm BasePart'lar `Anchored = false`; yalnızca hareketsiz heykel/manken sabitlenebilir).\n"
                 "- Eğer görevde yeni yapı/rig gerekmiyorsa `actions: []` döndür."
             )
             LIVE_STATE["status"] = f"{user['username']} | Aşama 1/3: Yapılar & Resmi Rigler..."
@@ -1536,10 +1539,11 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
 
                 # AŞAMA 2/3: ANİMASYONLAR & SİNEMATİK KAMERA (FOV, POV, BLUR/DOF)
                 rig_hint_block = ("\n" + "\n".join(rig_type_hints)) if rig_type_hints else ""
-                stage2_sys = base_sys + (
+                s2_base = mask_system_prompt_tools(base_sys, {"write_script", "edit_script", "run_luau", "insert_asset", "terrain_fill", "delete_instance", "edit_instance", "create_plugin"})
+                stage2_sys = s2_base + (
                     "\n\n[AŞAMA 2/3 - TOOL MASKING: SADECE ANİMASYONLAR, SİNEMATİK KAMERA (FOV/POV) VE BLUR/POST-FX]:\n"
                     "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `create_animation`, `create_cutscene`, `set_camera`, (ve sadece `Lighting` altı Post-FX için `create_instance`: BlurEffect, DepthOfFieldEffect, BloomEffect, ColorCorrectionEffect).\n"
-                    "- YASAKLI ARAÇLAR (BU AŞAMADA KULLANILAMAZ / SİLİNİR): `write_script`, `edit_script`, `run_luau`.\n"
+                    "- YASAKLI ARAÇLAR (BU AŞAMADA GİZLİ / SİLİNİR): `write_script`, `edit_script`, `run_luau`.\n"
                     "- `create_animation` aksiyonlarını doğru `rig_path` (örn. `Workspace.RigAdi`) ve rig tipine (R6 vs R15) tam uyumlu eklem isimleriyle üret.\n"
                     "- Sinematik kamera gerekiyorsa `create_cutscene` ile çoklu POV açıları, belirgin FOV değişimleri (75 -> 38 -> 85) ve `shake` ekle."
                     + rig_hint_block
@@ -1593,10 +1597,11 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                         f"\n- ZORUNLU AŞAMA 2 ANİMASYON LİSTESİ: Aşama 2'de şu animasyonlar üretildi: [{anim_names}]. "
                         "Bunları mutlaka `KeyframeSequenceProvider:RegisterKeyframeSequence(keyframeSeq)` -> `Animation.AnimationId = hashId` -> `animator:LoadAnimation(anim):Play()` köprüsüyle oynat!"
                     )
-                stage3_sys = base_sys + (
+                s3_base = mask_system_prompt_tools(base_sys, {"create_animation", "create_cutscene", "run_luau", "insert_asset", "terrain_fill", "set_camera"})
+                stage3_sys = s3_base + (
                     "\n\n[AŞAMA 3/3 - TOOL MASKING: SADECE SCRİPTLER VE ÇALIŞMA ZAMANI LUAU KODLARI]:\n"
                     "- İZİNLİ ARAÇLAR (SADECE BUNLAR): `write_script`, `edit_script`, `delete_instance`, (ve sadece `RemoteEvent`/`RemoteFunction` için `create_instance`).\n"
-                    "- YASAKLI ARAÇLAR (BU AŞAMADA KULLANILAMAZ / SİLİNİR): `create_animation`, `create_cutscene`, `run_luau`.\n"
+                    "- YASAKLI ARAÇLAR (BU AŞAMADA GİZLİ / SİLİNİR): `create_animation`, `create_cutscene`, `run_luau`.\n"
                     "- `LocalScript`leri her zaman `StarterPlayer.StarterPlayerScripts` içine koy.\n"
                     "- ZORUNLU RegisterKeyframeSequence ŞABLONU: Asla `animator:LoadAnimation(keyframeSequence)` çağırma. Her zaman `local id = game:GetService('KeyframeSequenceProvider'):RegisterKeyframeSequence(seq)` ile `Instance.new('Animation')` oluşturup `anim.AnimationId = id` yaptıktan sonra `LoadAnimation(anim)` kullan.\n"
                     "- CreateHumanoidModelFromDescription RİGLERİ İÇİN YÜRÜME ANİMASYONU: Resmi fonksiyonla üretilen NPC'lerde varsayılan `Animate` scripti bulunmadığından, `create_animation` ile üretilen yürüme animasyonunu (`NPCWalk`) NPC hareket ederken (`Humanoid.Running`) mutlaka oynat.\n"
