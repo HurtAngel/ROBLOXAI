@@ -2098,6 +2098,17 @@ local function executeActions(actions)
 			end
 		end)
 	end
+	pcall(function()
+		for _, ch in ipairs(workspace:GetDescendants()) do
+			if ch:IsA("SpawnLocation") then
+				ch.Transparency = 1
+				ch.CanCollide = false
+				for _, d in ipairs(ch:GetChildren()) do
+					if d:IsA("Decal") then d:Destroy() end
+				end
+			end
+		end
+	end)
 	ChangeHistoryService:SetWaypoint("AI V4 Snapshot End")
 	return table.concat(logs, "\n")
 end
