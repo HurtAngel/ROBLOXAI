@@ -90,7 +90,7 @@ def build_full_state_snapshot() -> dict:
     memories = [dict(m) for m in conn.execute("SELECT * FROM memory_logs ORDER BY id DESC LIMIT 100").fetchall()]
     conn.close()
     return {
-        "backup_version": "8.0-unified-4-units",
+        "backup_version": "9.2-unified-5-units",
         "synced_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg,
         "users": users,
@@ -226,7 +226,7 @@ def init_db():
         try:
             parsed_state = json.loads(raw_state) if isinstance(raw_state, str) else raw_state
             if apply_full_state_snapshot(parsed_state):
-                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve 4-Birim ayarları başarıyla geri yüklendi.")
+                print("[Upstash Redis] Kalıcı kullanıcılar, krediler ve 5-Birim ayarları başarıyla geri yüklendi.")
         except Exception as e:
             print(f"[Upstash Redis] Başlangıç geri yükleme hatası: {e}")
 
@@ -238,7 +238,7 @@ def get_db():
     return conn
 
 async def get_fresh_config() -> dict:
-    """Her çağrıda güncel 4-Birim ayarlarını Upstash Redis'ten okur (erişilemezse yerel SQLite'a düşer)."""
+    """Her çağrıda güncel 5-Birim ayarlarını Upstash Redis'ten okur (erişilemezse yerel SQLite'a düşer)."""
     url, token = get_upstash_creds()
     if url and token:
         try:
@@ -570,18 +570,18 @@ async def web_portal():
 
         <div class="card">
             <h3>
-                <span>4 Birim Bütünleşik Orkestrasyon Ayarları (1 Ana Orkestratör + 3 Uzman Katman)</span>
+                <span>5 Birim Bütünleşik Orkestrasyon Ayarları (1 Ana Orkestratör + 4 Uzman Katman)</span>
                 <div style="display:flex; gap:8px; align-items:center;">
                     <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(true)">Tümünü Aç</button>
                     <button class="btn btn-sm" style="background:#27272a;" onclick="toggleAllAccordions(false)">Tümünü Kapat</button>
                 </div>
             </h3>
             <p style="font-size:12px; color:var(--muted); margin-bottom:14px;">
-                Her agent için bağımsız Model ID (ör. <code>claude-haiku-5-5</code>, <code>qwen3-235b-a22b-instruct-2507</code>, <code>mistral-small-3-2-24b-instruct</code>) ve evrensel sistem talimatı atayabilirsin. Kaydettiğinde tüm 4 birim ayarı anında Upstash Redis'e yazılır ve her çağrıda oradan okunur.
+                Her agent için bağımsız Model ID (ör. <code>claude-haiku-5-5</code>, <code>qwen3-235b-a22b-instruct-2507</code>, <code>mistral-small-3-2-24b-instruct</code>) ve evrensel sistem talimatı atayabilirsin. Kaydettiğinde tüm 5 birim ayarı anında Upstash Redis'e yazılır ve her çağrıda oradan okunur.
             </p>
             <div style="display:flex; gap:10px; align-items:center; margin-bottom:16px; background:var(--bg); padding:10px 12px; border-radius:6px; border:1px solid var(--border);">
                 <input type="text" id="bulk_agent_model" placeholder="Toplu Model ID (ör. claude-haiku-5-5)" style="margin:0; flex:1;">
-                <button class="btn btn-amber btn-sm" onclick="applyBulkAgentModel()">Tüm 4 Birime Uygula</button>
+                <button class="btn btn-amber btn-sm" onclick="applyBulkAgentModel()">Tüm 5 Birime Uygula</button>
             </div>
             <div id="agents-accordion-container">Yükleniyor...</div>
             <button class="btn btn-success" style="width:100%; margin-top:12px; padding:12px;" onclick="saveSettings()">💾 Ayarları Kaydet (ve Upstash'e Eşitle)</button>
@@ -668,7 +668,7 @@ async def web_portal():
 
     <div id="sec-live" class="section">
         <div class="card">
-            <h3>Aktif Model & 4 Birim Canlı Boru Hattı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
+            <h3>Aktif Model & 5 Birim Canlı Boru Hattı <span id="active-model-badge" style="font-size:12px; color:var(--accent);"></span></h3>
             <div id="live-pipeline-grid" class="pipe-grid"></div>
             <div class="log-box" id="live-stream-box" style="min-height:140px; max-height:460px; overflow:auto; border-left:3px solid var(--success);">Bekleniyor...</div>
         </div>
@@ -890,7 +890,7 @@ async function saveSettings() {
         agents: agentsPayload
     });
     if (res.ok) {
-        alert('Tüm 4 Birim ve sistem ayarları kaydedildi, Upstash Redis ile eşitlendi.');
+        alert('Tüm 5 Birim ve sistem ayarları kaydedildi, Upstash Redis ile eşitlendi.');
     } else {
         alert('Ayarlar kaydedilirken hata oluştu.');
     }
@@ -1852,7 +1852,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             TASKS[task_id]["buffer"] = report
         return report
 
-    LIVE_STATE["status"] = f"{user['username']} | V8 Bütünleşik 4 Birim Üretimi başlıyor..."
+    LIVE_STATE["status"] = f"{user['username']} | V9.2 Bütünleşik 5 Birim Üretimi başlıyor..."
     LIVE_STATE["buffer"] = ""
     sync_live("Main Agent üretim planını hazırlıyor...")
 
@@ -1887,6 +1887,7 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
             combined_actions: list[dict] = []
             combined_thoughts: list[str] = []
             world_manifest = V7.create_empty_manifest(str(project_notes.get("game_title") or ""))
+            camera_fx_manifest = V7.create_empty_manifest(str(project_notes.get("game_title") or ""))
             client_manifest = V7.create_empty_manifest(str(project_notes.get("game_title") or ""))
 
             # =========================================================
@@ -1989,6 +1990,16 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     anim_names = [x.get("name") if isinstance(x, dict) else str(x) for x in world_manifest.get("animations", [])]
                     if anim_names:
                         extra_notes.append("WORLD_MANIFEST ANİMASYONLARI (birebir aynı isimle AIKit.PlayAnim kullan): " + ", ".join(anim_names))
+                    cfx_list = []
+                    for x in camera_fx_manifest.get("camera_fx", []):
+                        if isinstance(x, dict):
+                            fn = x.get("fn") or x.get("name") or ""
+                            usg = x.get("usage") or ""
+                            cfx_list.append(f"CameraFX.{fn}() -> {usg}" if usg else f"CameraFX.{fn}()")
+                        else:
+                            cfx_list.append(str(x))
+                    if cfx_list:
+                        extra_notes.append("CAMERA_FX_MANIFEST FONKSİYONLARI (ReplicatedStorage.AI_CameraFX require edip her hareket/yetenekte birebir çağır): " + " | ".join(cfx_list))
                     extra_notes.append("TÜM istemci arayüzü (StartMenuGui, GameHUD, PlayerGuideUI), tuşlar ve kamera-güvenli FOV TEK BİR `StarterPlayer.StarterPlayerScripts.ClientGameCore` LocalScript'i içinde olmalıdır. Başlangıçta PlayerGui'deki eski kopyaları Destroy() ile temizle.")
                 elif aid == "layer_server_core":
                     rem_desc = []
@@ -2015,8 +2026,10 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                     "SCENE_HIERARCHY": scene_compact,
                     "SELECTED_ITEMS": payload.get("selected_items", []),
                 }
-                if aid in ("layer_client_core", "layer_server_core"):
+                if aid in ("layer_camera_fx", "layer_client_core", "layer_server_core"):
                     sub_payload["WORLD_MANIFEST"] = world_manifest
+                if aid in ("layer_client_core", "layer_server_core"):
+                    sub_payload["CAMERA_FX_MANIFEST"] = camera_fx_manifest
                     sub_payload["PROJECT_INDEX"] = payload.get("project_shortened_index", [])
                     sub_payload["REQUESTED_FILES_CONTENT"] = payload.get("requested_files_content", {})
                     sub_payload["GECMIS_HAFIZA"] = memory_list
@@ -2106,6 +2119,11 @@ async def process_task(task_id: str, user: dict, payload: dict, raw_in_tokens: i
                         world_manifest = V7.merge_manifest(world_manifest, sub_json.get("manifest_updates"), aid, filtered_actions)
                         handoffs.append(
                             f"Katman 1 (Dünya) → WORLD_MANIFEST: {len(world_manifest['world_objects'])} obje, {len(world_manifest['animations'])} animasyon"
+                        )
+                    elif aid == "layer_camera_fx":
+                        camera_fx_manifest = V7.merge_manifest(camera_fx_manifest, sub_json.get("manifest_updates"), aid, filtered_actions)
+                        handoffs.append(
+                            f"Katman 2 (Kamera Efektleri) → CAMERA_FX_MANIFEST: {len(camera_fx_manifest['camera_fx'])} sinematik efekt fonksiyonu"
                         )
                     elif aid == "layer_client_core":
                         client_manifest = V7.merge_manifest(client_manifest, sub_json.get("manifest_updates"), aid, filtered_actions)
@@ -2220,7 +2238,7 @@ async def execute_task(request: Request, client_key: str = Header(None)):
         return JSONResponse({"error": "Yetersiz kredi (Token)."}, status_code=402)
 
     task_id = str(uuid.uuid4())
-    TASKS[task_id] = {"status": "processing", "buffer": "V8 Bütünleşik 4 Birim Orkestratörü başlatılıyor...", "agent_pipeline": [], "handoff_logs": []}
+    TASKS[task_id] = {"status": "processing", "buffer": "V9.2 Bütünleşik 5 Birim Orkestratörü başlatılıyor...", "agent_pipeline": [], "handoff_logs": []}
     asyncio.create_task(process_task(task_id, user, payload, raw_in_tokens))
     return {"task_id": task_id, "role": user["role"], "username": user["username"]}
 

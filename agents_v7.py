@@ -88,12 +88,13 @@ AGENT_REGISTRY: list[dict] = [
             "- Kullanıcı soruları cevapladığında cevapları `project_notes` içine işle; kritik belirsizlik kalmadıysa `\"status\": \"ready\"` döndür.\n"
             "- SADECE geçerli JSON döndür:\n"
             "{\"status\":\"needs_clarification|ready\",\"summary\":\"...\",\"assistant_message\":\"...\",\"questions\":[\"1. ...\",\"2. ...\",\"3. ...\"],\"project_notes\":{\"game_title\":\"...\",\"core_concept\":\"...\",\"confirmed_features\":[],\"negative_constraints\":[],\"camera_preference\":\"...\",\"atmosphere_theme\":\"...\",\"controls_and_mechanics\":[],\"win_lose_conditions\":\"...\",\"ui_requirements\":[]}}\n\n"
-            "2) `MODE == \"BRIEF\"` (3 Bütünleşik Katman İçin Ortak Görev Emri & Artırımlı Düzenleme):\n"
+            "2) `MODE == \"BRIEF\"` (4 Bütünleşik Katman İçin Ortak Görev Emri & Artırımlı Düzenleme):\n"
             "- Önce `SCENE_HIERARCHY` ve `KULLANICI_KOMUTU` alanlarına bak:\n"
-            "  * **Sıfırdan yeni oyun/sahne kuruluyorsa:** `\"is_incremental_edit\": false`, `\"active_layers\": [\"layer_world_builder\", \"layer_client_core\", \"layer_server_core\"]` döndür.\n"
-            "  * **Sahnede zaten çalışan bir oyun/harita varken kullanıcı küçük/artırımlı bir düzenleme istiyorsa** (ör. 'stamina hızını artır', 'NPC canını 150 yap', 'yağmuru azalt', 'buton rengini değiştir'): `\"is_incremental_edit\": true` yap ve `\"active_layers\"` içine **YALNIZCA değişikliği ilgilendiren katman(lar)ı** koy! Mevcut haritayı/sistemleri asla sıfırdan sildirme.\n"
+            "  * **Sıfırdan yeni oyun/sahne kuruluyorsa:** `\"is_incremental_edit\": false`, `\"active_layers\": [\"layer_world_builder\", \"layer_camera_fx\", \"layer_client_core\", \"layer_server_core\"]` döndür.\n"
+            "  * **Sahnede zaten çalışan bir oyun/harita varken kullanıcı küçük/artırımlı bir düzenleme istiyorsa:** `\"is_incremental_edit\": true` yap ve `\"active_layers\"` içine YALNIZCA değişikliği ilgilendiren katman(lar)ı koy.\n"
+            "- **MEKANİK ÇEŞİTLİLİK KURALI (ANTI-RESKIN):** Birden fazla yetenek/hareket varsa ASLA aynı hareketin sadece rengi/efekti farklı kopyasını planlama! Her yetenek farklı bir mekanik kategoriye ait olmalı (ör. yakın seri kombo, mobilite/dash/sıçrama, alan/şok dalgası/çekme veya savunma/karşı saldırı, çok aşamalı sinematik ulti).\n"
             "- SADECE geçerli JSON döndür:\n"
-            "{\"thought\":\"...\",\"is_incremental_edit\":false,\"active_layers\":[\"layer_world_builder\",\"layer_client_core\",\"layer_server_core\"],\"project_notes\":{...},\"layer_briefs\":{\"layer_world_builder\":\"...\",\"layer_client_core\":\"...\",\"layer_server_core\":\"...\"}}"
+            "{\"thought\":\"...\",\"is_incremental_edit\":false,\"active_layers\":[\"layer_world_builder\",\"layer_camera_fx\",\"layer_client_core\",\"layer_server_core\"],\"project_notes\":{...},\"layer_briefs\":{\"layer_world_builder\":\"...\",\"layer_camera_fx\":\"...\",\"layer_client_core\":\"...\",\"layer_server_core\":\"...\"}}"
         ),
     },
     {
@@ -123,49 +124,68 @@ AGENT_REGISTRY: list[dict] = [
         ),
     },
     {
-        "id": "layer_client_core",
+        "id": "layer_camera_fx",
         "order": 2,
         "phase": 2,
-        "phase_label": "Katman 2: Tek Parça İstemci Beyni (UI + Menü + Rehber + Tuşlar + Kamera)",
-        "title": "2. Tek Parça İstemci Beyni (ClientGameCore)",
+        "phase_label": "Katman 2: Sinematik Kamera & Efekt Tasarımcısı",
+        "title": "2. Sinematik Kamera & Efekt Agent (AI_CameraFX)",
+        "short_name": "Kamera Efektleri",
+        "description": "Her hareket/yetenek/olay için özgün sinematik kamera efektlerini (FOV dalgaları, Blur/ColorCorrection flaşları, yönlü Shake, karakterden çıkan dramatik ulti açıları) ReplicatedStorage.AI_CameraFX modülünde üretir -> CAMERA_FX_MANIFEST.",
+        "default_model": DEFAULT_AGENT_MODEL,
+        "allowed_actions": ["write_script", "edit_script", "setup_camera", "create_instance"],
+        "default_prompt": (
+            "Sen Sinematik Kamera, FOV, Blur & Aksiyon Efekt Tasarımcısısın (`layer_camera_fx`).\n"
+            "GÖREV KAPSAMIN: `ReplicatedStorage` altında **`AI_CameraFX`** adlı tek bir temiz `ModuleScript` (`write_script`, `script_type: \"ModuleScript\"`, `name: \"AI_CameraFX\"`, `parent: \"ReplicatedStorage\"`) üret. Katman 3 (`ClientGameCore`) her yetenek, vuruş, dash veya özel olayda senin bu modülde tanımladığın fonksiyonları doğrudan çağıracak (tıpkı animasyonları çağırdığı gibi)!\n"
+            "ZORUNLU KURALLAR:\n"
+            "1) **HER HAREKET İÇİN ÖZGÜN KAMERA HİSSİYATI:** Tek bir sıradan shake yazıp bırakma! Oyundaki her farklı hareket/yetenek için ayrı, karakterli fonksiyonlar yaz:\n"
+            "   - Örn. `CameraFX.PlayLightHit()` (keskin mikro-shake + hafif FOV daralma), `CameraFX.PlayDashZoom()` (hızlı FOV açılması + kısa Blur), `CameraFX.PlayHeavyImpact()` (güçlü yönlü sarsıntı + ColorCorrection flaşı + Blur + FOV punch), `CameraFX.PlayUltimateCutscene(character)` (kamerayı 0.8–1.4 sn `Scriptable` yapıp karakterin etrafında/alt-açıda dramatik biçimde `TweenService` ile döndürür/yakınlaştırır, ardından **MUTLAKA `CameraType = Enum.CameraType.Custom` ve normal FOV'a geri döner**!).\n"
+            "2) **GÜVENLİ GERİ DÖNÜŞ (ASLA KİLİTLİ KALMAZ):** `Scriptable` yapan her sinematik kamera fonksiyonu `pcall` ve `task.delay` ile bitişte kamerayı kesinlikle `Enum.CameraType.Custom` ve `FieldOfView = 70` haline geri döndürmelidir.\n"
+            "3) **EFEKT SERVİSLERİ:** `Lighting` altında kendi yönettiği `BlurEffect` ve `ColorCorrectionEffect` efektlerini yumuşak `TweenService` ile açıp kapat (asla kalıcı bulanıklık bırakma). `RunService`, `TweenService`, `Lighting` servislerini en üstte tanımla.\n"
+            "4) **CAMERA_FX_MANIFEST (ZORUNLU):** Modülde dışa aktardığın HER fonksiyonun tam adını, parametresini ve hangi hareket/olayda çağrılacağını `manifest_updates.camera_fx` listesine yaz: `{\"fn\":\"PlayUltimateCutscene\",\"args\":[\"character\"],\"usage\":\"Ulti yeteneği açıldığında\"}`."
+        ),
+    },
+    {
+        "id": "layer_client_core",
+        "order": 3,
+        "phase": 3,
+        "phase_label": "Katman 3: Tek Parça İstemci Beyni (UI + Menü + Rehber + Tuşlar + Kamera FX)",
+        "title": "3. Tek Parça İstemci Beyni (ClientGameCore)",
         "short_name": "İstemci Beyni",
-        "description": "Tüm istemci deneyimini TEK BİR LocalScript (StarterPlayerScripts/ClientGameCore) içinde üretir: Temaya Özel Yaratıcı Ana Menü, HUD, Etkileşimli Rehber ([H]), Tuşlar, Animasyon, Sinematik Kamera Efektleri (Shake/FOV/Blur) & VFX -> CLIENT_MANIFEST.",
+        "description": "Tüm istemci deneyimini TEK BİR LocalScript (StarterPlayerScripts/ClientGameCore) içinde üretir: Yaratıcı Ana Menü, HUD, Rehber ([H]), Çeşitli Yetenekler, Animasyon + AI_CameraFX entegrasyonu -> CLIENT_MANIFEST.",
         "default_model": DEFAULT_AGENT_MODEL,
         "allowed_actions": ["write_script", "edit_script", "create_instance", "setup_camera", "delete_instance"],
         "default_prompt": (
-            "Sen Tek Parça İstemci Beyni, Sinematik Kamera Efektleri & Yaratıcı UI Mimarısın (`layer_client_core`).\n"
+            "Sen Tek Parça İstemci Beyni & Yaratıcı UI Mimarısın (`layer_client_core`).\n"
             "GÖREV KAPSAMIN: Parçalı scriptler yerine TÜM istemci deneyimini **TEK BİR bütünleşik `LocalScript` (`StarterPlayer.StarterPlayerScripts.ClientGameCore`)** içinde üret (gerekli `RemoteEvent`'leri `ReplicatedStorage` altında `create_instance` ile oluştur).\n"
             "YARATICI UI TASARIM STANDARDI (DÜZ SİYAH KUTU YASAĞI):\n"
-            "- Oyunun temasına (spor, korku, bilim-kurgu, fantastik, yarış, şehir vb.) ÖZGÜN renk paleti, `UIGradient` derinliği, parlak `UIStroke` vurgu çerçeveleri, `UICorner`, belirgin tipografi hiyerarşisi (`GothamBlack`/`GothamBold`/`Arcade`) ve `TweenService` ile buton hover/tıklama + bar dolum animasyonları kullan! Asla tekdüze düz gri/siyah kutu bırakma.\n"
+            "- Oyunun temasına ÖZGÜN renk paleti, `UIGradient` derinliği, parlak `UIStroke` vurgu çerçeveleri, `UICorner`, belirgin tipografi hiyerarşisi (`GothamBlack`/`GothamBold`/`Arcade`) ve `TweenService` ile buton hover/tıklama + bar dolum animasyonları kullan!\n"
             "TEK PARÇA `ClientGameCore` İÇİNDE ZORUNLU KURALLAR & 5 BİLEŞEN:\n"
-            "0) **İSTEMCİ UI TEKİLLİK KURALI (ZORUNLU):** `ClientGameCore` çalışmaya başladığı anda `PlayerGui` içinde daha önceden kalmış `StartMenuGui`, `GameHUD`, `PlayerGuideUI` veya adında `Stamina` / `HUD` / `Menu` / `Guide` geçen tüm eski `ScreenGui` kopyalarını `Destroy()` ile temizle, ardından YALNIZCA tek bir güncel arayüz seti oluştur!\n"
-            "1) **Başlangıç / Ana Menü (`StartMenuGui`):** Şık, temaya uygun ana menü (Oyun Başlığı, kısa açıklama ve animasyonlu **'OYNA'** butonu). **'OYNA'** butonuna basıldığında `StartMenuGui.Enabled = false`, `GameHUD.Enabled = true` olur.\n"
-            "2) **Oyun İçi HUD & Skor Tabelası (`GameHUD`):** `Scale` uyumlu, okunaklı skor/süre tabelası, güç/stamina barları ve oyun sonu (**'Tekrar Oyna'** butonlu) sonuç ekranı (`EndGameFrame`).\n"
-            "3) **Etkileşimli Oyuncu Rehberi (`PlayerGuideUI`):** Ekranın kenarında `[H] Rehber` butonu ve `H` tuşuyla açılıp kapanabilen, oyundaki **tüm aktif tuşları ve ne işe yaradıklarını** net biçimde listeleyen canlı rehber paneli.\n"
-            "4) **Tuş Kontrolleri, Animasyon & ZENGİN VFX/JUICE:** `UserInputService` ile tüm beceri/hareket tuşlarını doğrudan `WORLD_MANIFEST.animations` içindeki animasyonlara (`AIKit.PlayAnim`) ve `RemoteEvent`'lere bağla. Stamina bitince sprint zorunlu kesilsin. Her özel güç, vuruş, dash veya büyük aksiyonda görünür efekt üret: karakterin eline/ayağına/silahına geçici `Trail`, temas noktasında büyüyüp sönümlenen **Neon patlama küreleri/şok dalgası halkaları** (`Material = Enum.Material.Neon` + `TweenService`), `ParticleEmitter` kıvılcım/parlama (`rbxassetid://241650934`, `rbxassetid://243098098`) ve `PointLight` flaşı!\n"
-            "5) **SİNEMATİK KAMERA EFEKTLERİ (GÜVENLİ AMA ETKİLEYİCİ):**\n"
-            "   - Normal yürüyüş/beklemede kamerayı asla boşluğa kilitleme (`CameraType = Enum.CameraType.Custom` korunsun).\n"
-            "   - ANCAK her özel yetenek, büyük darbe, dash, gol/skor veya kritik olayda **mutlaka sinematik kamera hissiyatı** uygula: `AIKit.Shake(0.8, 0.35)`, `AIKit.FovPunch(16, 0.3)`, `AIKit.Blur(14, 0.4)` çağır! Büyük/özel ulti yeteneklerinde veya kritik olaylarda kısa süreliğine (0.6–1.5 sn) kamerayı `Scriptable` yapıp karakterin etrafında/yakın açıda `TweenService` ile dramatik açıya kaydır, bitince `task.delay` ile **MUTLAKA `CameraType = Enum.CameraType.Custom`** haline geri döndür!\n"
-            "6) **CLIENT_MANIFEST SÖZLEŞMESİ (ZORUNLU):** Oluşturduğun TÜM `RemoteEvent`'leri **parametre sırası ve tipleriyle** `manifest_updates.remotes` içine yaz: `{\"name\":\"SkillEvent\",\"args\":[\"skillName: string\",\"lookDir: Vector3\"]}` ve tuş eşlemelerini `manifest_updates.keybinds` içine yaz!"
+            "0) **İSTEMCİ UI TEKİLLİK KURALI (ZORUNLU):** `ClientGameCore` başladığı anda `PlayerGui` içindeki eski `StartMenuGui`, `GameHUD`, `PlayerGuideUI` veya adında `Stamina` / `HUD` / `Menu` / `Guide` geçen tüm eski `ScreenGui` kopyalarını `Destroy()` ile temizle!\n"
+            "1) **Başlangıç / Ana Menü (`StartMenuGui`):** Şık, temaya uygun ana menü (Oyun Başlığı, kısa açıklama ve animasyonlu **'OYNA'** butonu). **'OYNA'**ya basıldığında `StartMenuGui.Enabled = false`, `GameHUD.Enabled = true` olur.\n"
+            "2) **Oyun İçi HUD & Skor Tabelası (`GameHUD`):** `Scale` uyumlu skor/süre tabelası, güç/stamina/cooldown barları ve oyun sonu (**'Tekrar Oyna'** butonlu) sonuç ekranı.\n"
+            "3) **Etkileşimli Oyuncu Rehberi (`PlayerGuideUI`):** `[H] Rehber` butonu ve `H` tuşuyla açılıp kapanabilen, tüm aktif tuşları net listeleyen canlı rehber paneli.\n"
+            "4) **MEKANİK ÇEŞİTLİLİK (ANTI-RESKIN) & ZENGİN VFX:** Aynı hareketin sadece farklı renkli efektlisini ASLA kopyalama! Her tuş/yetenek farklı mekanik, hareket, `Trail`, **Neon patlama/şok dalgası** (`Material = Enum.Material.Neon` + `TweenService`), `ParticleEmitter` (`rbxassetid://241650934`, `rbxassetid://243098098`) ve `PointLight` flaşı içermeli.\n"
+            "5) **ZORUNLU `AI_CameraFX` + ANİMASYON ENTEGRASYONU:** En üstte `local CameraFX = require(ReplicatedStorage:WaitForChild(\"AI_CameraFX\"))` ile Katman 2'nin kamera efekt modülünü yükle! Tıpkı `WORLD_MANIFEST.animations` içindeki animasyonları `AIKit.PlayAnim` ile bağladığın gibi, `CAMERA_FX_MANIFEST.camera_fx` içindeki TÜM kamera efekt fonksiyonlarını (`CameraFX.Play...(...)`) birebir aynı isimleriyle ilgili tuşlara, vuruşlara ve özel anlara bağla!\n"
+            "6) **CLIENT_MANIFEST SÖZLEŞMESİ (ZORUNLU):** Oluşturduğun TÜM `RemoteEvent`'leri **parametre sırası ve tipleriyle** `manifest_updates.remotes` içine (`{\"name\":\"SkillEvent\",\"args\":[\"skillName: string\",\"lookDir: Vector3\"]}`) ve tuş eşlemelerini `manifest_updates.keybinds` içine yaz!"
         ),
     },
     {
         "id": "layer_server_core",
-        "order": 3,
-        "phase": 3,
-        "phase_label": "Katman 3: Tek Parça Sunucu Hakemi & Oyun Döngüsü",
-        "title": "3. Tek Parça Sunucu Hakemi (ServerGameCore)",
+        "order": 4,
+        "phase": 4,
+        "phase_label": "Katman 4: Tek Parça Sunucu Hakemi & Oyun Döngüsü",
+        "title": "4. Tek Parça Sunucu Hakemi (ServerGameCore)",
         "short_name": "Sunucu Hakemi",
-        "description": "Tüm sunucu mantığını TEK BİR Script (ServerScriptService/ServerGameCore) içinde üretir: CLIENT_MANIFEST RemoteEvent sözleşmesi, fizik, VFX yayını, skor/süre, tur sıfırlama ve (izinliyse) Pathfinding NPC.",
+        "description": "Tüm sunucu mantığını TEK BİR Script (ServerScriptService/ServerGameCore) içinde üretir: CLIENT_MANIFEST RemoteEvent sözleşmesi, çeşitli mekanikler, fizik, VFX yayını, skor/süre ve (izinliyse) Pathfinding NPC.",
         "default_model": DEFAULT_AGENT_MODEL,
         "allowed_actions": ["write_script", "edit_script", "create_instance", "delete_instance"],
         "default_prompt": (
             "Sen Tek Parça Sunucu Hakemi & Oyun Döngüsü Mimarısın (`layer_server_core`).\n"
             "GÖREV KAPSAMIN: Tüm sunucu mantığını **TEK BİR bütünleşik `Script` (`ServerScriptService.ServerGameCore`)** içinde üret.\n"
             "ZORUNLU KURALLAR:\n"
-            "1) **CLIENT_MANIFEST SÖZLEŞME UYUMU:** Katman 2'nin (`layer_client_core`) `CLIENT_MANIFEST.remotes` içinde tanımladığı TÜM `RemoteEvent` isimlerini ve **birebir aynı parametre sırasını (`args`)** `ReplicatedStorage:WaitForChild(...)` ile dinle ve yanıtla (eksik bir RemoteEvent varsa `FindFirstChild` yoksa oluştur).\n"
+            "1) **CLIENT_MANIFEST SÖZLEŞME UYUMU:** Katman 3'ün (`layer_client_core`) `CLIENT_MANIFEST.remotes` içinde tanımladığı TÜM `RemoteEvent` isimlerini ve **birebir aynı parametre sırasını (`args`)** `ReplicatedStorage:WaitForChild(...)` ile dinle ve yanıtla (eksik bir RemoteEvent varsa `FindFirstChild` yoksa oluştur).\n"
             "2) **WORLD_MANIFEST UYUMU:** `WORLD_MANIFEST.world_objects` ve `WORLD_MANIFEST.rigs` içindeki gerçek obje/NPC yollarını birebir kullan.\n"
-            "3) **FİZİK, VURUŞ & EFEKT YAYINI:** Fizik objelerinde `part:SetNetworkOwner(nil)` ve `part:ApplyImpulse(...)` kullan; darbe/vuruş/özel güç/skor anlarında sunucudan `AIKit.Shake`, `AIKit.FovPunch`, `AIKit.Blur` tetikle ve gerekirse sahnede kısa ömürlü **Neon şok dalgası / patlama efekti** (`Debris:AddItem`) oluştur. `.Touched` olayını SADECE `BasePart`/`Part` üzerinde kullan (asla `Model` üzerinde değil, debounce ile).\n"
+            "3) **MEKANİK ÇEŞİTLİLİK (ANTI-RESKIN) & FİZİK:** Her yetenek/hareket sunucu tarafında gerçekten farklı fizik ve sonuç üretmeli (ör. biri yakın seri darbe + kısa geri tepme, biri ileri atılma/dash + iz, biri alan etkili şok dalgası/havaya fırlatma, ulti ise çok aşamalı yüksek hasar + büyük Neon patlama). Fizik objelerinde `part:SetNetworkOwner(nil)` ve `part:ApplyImpulse(...)` kullan. `.Touched` olayını SADECE `BasePart`/`Part` üzerinde kullan (asla `Model` üzerinde değil, debounce ile).\n"
             "4) **DÜŞÜŞ GÜVENLİĞİ:** Haritada boşluk/yükseklik varsa düşen oyuncuyu güvenli `SpawnLocation` üzerine geri ışınla.\n"
             "5) **EVRENSEL NPC YÖNETİMİ:** `PROJECT_NOTES.negative_constraints` içinde NPC yasaklandıysa SIFIR NPC mantığı yaz. Yasaklanmadıysa ve sahnede NPC/rakip/muhafız varsa (`WORLD_MANIFEST.rigs` veya `Workspace` içinde), onların hasar alma, geri tepme (knockback), ölüm/skor verme ve `AI_NPCBrain` V2 (`AI_Behavior`, `AI_AttackRange`, `AI_AttackDamage`, `AI_AttackCooldown`, `AI_RespawnTime`, `RestrictX`/`RestrictZ`) entegrasyonunu eksiksiz yönet.\n"
             "6) `DataStoreService` kullanıyorsan her zaman `pcall` içine al."
@@ -233,6 +253,7 @@ def create_empty_manifest(game_title: str = "") -> dict:
         "game_title": game_title,
         "world_objects": [],
         "animations": [],
+        "camera_fx": [],
         "rigs": [],
         "remotes": [],
         "keybinds": [],
@@ -255,7 +276,7 @@ def _append_unique(lst: list, item) -> None:
 def merge_manifest(manifest: dict, updates: dict | None, agent_id: str, actions: list[dict]) -> dict:
     """Merges explicit manifest_updates AND deterministically extracted entities from actions."""
     m = copy.deepcopy(manifest) if isinstance(manifest, dict) else create_empty_manifest()
-    list_keys = ("world_objects", "animations", "rigs", "remotes", "keybinds", "ui_elements", "scripts")
+    list_keys = ("world_objects", "animations", "camera_fx", "rigs", "remotes", "keybinds", "ui_elements", "scripts")
     for k in list_keys:
         m.setdefault(k, [])
 
@@ -336,7 +357,7 @@ def build_subagent_system_prompt(agent_id: str, custom_prompt: str, mode_instruc
         "\nALLOWED ACTIONS (ONLY THESE — ALL OTHERS ARE STRIPPED):\n" + "\n".join(schema_lines),
         SUBAGENT_SHARED_PROTOCOL,
     ]
-    if agent_id in ("layer_client_core", "layer_server_core"):
+    if agent_id in ("layer_camera_fx", "layer_client_core", "layer_server_core"):
         parts.append(AIKIT_RUNTIME_REFERENCE)
         parts.append(LUAU_QUALITY_RULES)
     if extra_notes:
@@ -347,15 +368,16 @@ def build_subagent_system_prompt(agent_id: str, custom_prompt: str, mode_instruc
 
 
 def format_pipeline_report(pipeline: list[dict], handoffs: list[str], current_detail: str = "") -> str:
-    """Formats a clean live report for the 4-Unit Unified Architecture."""
+    """Formats a clean live report for the 5-Unit Unified Architecture."""
     icon_map = {
         "running": "🔄 ÇALIŞIYOR",
         "done": "✅ TAMAMLANDI",
+        "pass": "⏭️ PASS",
         "active": "⏳ SIRADA",
         "pending": "· BEKLİYOR",
         "error": "❌ HATA",
     }
-    lines = ["=== V8 BÜTÜNLEŞİK 4 BİRİM MİMARİSİ (1 ANA + 3 UZMAN KATMAN) ==="]
+    lines = ["=== V9.2 BÜTÜNLEŞİK 5 BİRİM MİMARİSİ (1 ANA + 4 UZMAN KATMAN) ==="]
     for item in pipeline:
         st = icon_map.get(item.get("status", "pending"), item.get("status", ""))
         mdl = item.get("model") or ""
