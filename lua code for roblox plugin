@@ -1596,14 +1596,22 @@ end
 return AIKit
 ]==]
 local AIKIT_NPC_BRAIN_SOURCE = [==[
--- AI Studio V6: Sunucu NPC beyni. "AI_NPC" etiketli modelleri AI_Behavior attribute'una göre yürütür.
+-- AI Studio V9: Gelişmiş Sunucu NPC Motoru (PathfindingService + Engel Zıplama + RestrictX/Z + Saldırı + Respawn)
 -- Davranışlar: idle | wander | patrol | follow_player | follow_target
--- Attribute'lar: AI_WanderRadius, AI_Patrol (JSON [[x,y,z],...]), AI_SightRange, AI_FollowDistance, AI_TargetPath
+-- Attribute'lar: AI_WanderRadius, AI_Patrol, AI_SightRange, AI_FollowDistance, AI_TargetPath,
+--                RestrictX, RestrictZ, AI_AttackRange, AI_AttackDamage, AI_AttackCooldown, AI_AttackAnim, AI_RespawnTime
 local CollectionService = game:GetService("CollectionService")
+local PathfindingService = game:GetService("PathfindingService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local brains = {}
+local AIKit = nil
+pcall(function()
+	local m = ReplicatedStorage:FindFirstChild("AIKit")
+	if m and m:IsA("ModuleScript") then AIKit = require(m) end
+end)
 
 local function nearestCharacter(pos, maxDist)
 	local best, bestD = nil, maxDist
@@ -1655,55 +1663,120 @@ local function clampAxis(val, homeVal, attr)
 	return val
 end
 
+local function moveSmart(hum, root, dest, usePath, state)
+	local dist = Vector3.new(dest.X - root.Position.X, 0, dest.Z - root.Position.Z).Magnitude
+	if dist < 1.2 then return end
+
+	if usePath and dist > 7 then
+		local path = PathfindingService:CreatePath({ AgentRadius = 2.2, AgentHeight = 5, AgentCanJump = true })
+		local ok = pcall(function() path:ComputeAsync(root.Position, dest) end)
+		if ok and path.Status == Enum.PathStatus.Success then
+			local wps = path:GetWaypoints()
+			local nextWp = wps[2] or wps[1]
+			if nextWp then
+				if nextWp.Action == Enum.PathWaypointAction.Jump then hum.Jump = true end
+				hum:MoveTo(nextWp.Position)
+				return
+			end
+		end
+	end
+
+	-- Takılma algılama: hareket etmesi gerekirken yerinde sayıyorsa zıpla
+	local now = os.clock()
+	if state.lastCheckPos and (now - (state.lastCheckTime or 0)) > 1.0 then
+		if (root.Position - state.lastCheckPos).Magnitude < 0.6 and dist > 3 then
+			hum.Jump = true
+		end
+		state.lastCheckPos = root.Position
+		state.lastCheckTime = now
+	elseif not state.lastCheckPos then
+		state.lastCheckPos = root.Position
+		state.lastCheckTime = now
+	end
+	hum:MoveTo(dest)
+end
+
+local function faceTarget(root, targetPos)
+	local flat = Vector3.new(targetPos.X - root.Position.X, 0, targetPos.Z - root.Position.Z)
+	if flat.Magnitude > 0.2 then
+		pcall(function() root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit) end)
+	end
+end
+
 local function step(model, hum, root, state)
 	local behavior = model:GetAttribute("AI_Behavior") or "idle"
 	if behavior == "wander" then
 		local r = math.max(4, math.floor(model:GetAttribute("AI_WanderRadius") or 25))
-		hum:MoveTo(state.home + Vector3.new(math.random(-r, r), 0, math.random(-r, r)))
-		hum.MoveToFinished:Wait()
-		task.wait(math.random(8, 25) / 10)
+		local dest = state.home + Vector3.new(math.random(-r, r), 0, math.random(-r, r))
+		moveSmart(hum, root, dest, true, state)
+		task.wait(math.random(12, 28) / 10)
 	elseif behavior == "patrol" then
 		local okJ, pts = pcall(function() return HttpService:JSONDecode(model:GetAttribute("AI_Patrol") or "[]") end)
 		if okJ and type(pts) == "table" and #pts > 0 then
 			local p = pts[(state.patrolIndex - 1) % #pts + 1]
-			state.patrolIndex += 1
-			hum:MoveTo(Vector3.new(p[1] or 0, p[2] or 0, p[3] or 0))
-			hum.MoveToFinished:Wait()
-			task.wait(0.4)
+			local dest = Vector3.new(p[1] or 0, p[2] or 0, p[3] or 0)
+			moveSmart(hum, root, dest, true, state)
+			if Vector3.new(dest.X - root.Position.X, 0, dest.Z - root.Position.Z).Magnitude < 4 then
+				state.patrolIndex += 1
+				task.wait(0.4)
+			else
+				task.wait(0.25)
+			end
 		else
 			task.wait(1)
 		end
 	elseif behavior == "follow_player" or behavior == "follow_target" then
 		local targetPos = nil
+		local targetChar = nil
 		if behavior == "follow_target" then
 			local obj = resolvePath(model:GetAttribute("AI_TargetPath"))
 			if obj and obj:IsA("BasePart") then targetPos = obj.Position
 			elseif obj and obj:IsA("Model") then targetPos = obj:GetPivot().Position end
 		else
-			local char = nearestCharacter(root.Position, model:GetAttribute("AI_SightRange") or 80)
-			if char then targetPos = char.HumanoidRootPart.Position end
+			targetChar = nearestCharacter(root.Position, model:GetAttribute("AI_SightRange") or 80)
+			if targetChar then targetPos = targetChar.HumanoidRootPart.Position end
 		end
 		local rx, rz = model:GetAttribute("RestrictX"), model:GetAttribute("RestrictZ")
 		local hasRestrict = (rx ~= nil or rz ~= nil)
 		if targetPos then
+			local movePos = targetPos
 			if hasRestrict then
-				targetPos = Vector3.new(clampAxis(targetPos.X, state.home.X, rx), root.Position.Y, clampAxis(targetPos.Z, state.home.Z, rz))
+				movePos = Vector3.new(clampAxis(targetPos.X, state.home.X, rx), root.Position.Y, clampAxis(targetPos.Z, state.home.Z, rz))
 			end
-			local stopDist = model:GetAttribute("AI_FollowDistance") or (hasRestrict and 1.5 or 5)
-			local flatDist = Vector3.new(targetPos.X - root.Position.X, 0, targetPos.Z - root.Position.Z).Magnitude
+			local stopDist = model:GetAttribute("AI_FollowDistance") or (hasRestrict and 1.5 or 4.5)
+			local flatDist = Vector3.new(movePos.X - root.Position.X, 0, movePos.Z - root.Position.Z).Magnitude
 			if flatDist > stopDist then
-				hum:MoveTo(targetPos)
+				moveSmart(hum, root, movePos, not hasRestrict, state)
 			else
 				hum:MoveTo(root.Position)
+				faceTarget(root, targetPos)
+			end
+
+			-- Opsiyonel saldırı/etkileşim döngüsü
+			local atkDmg = tonumber(model:GetAttribute("AI_AttackDamage")) or 0
+			local atkRange = tonumber(model:GetAttribute("AI_AttackRange")) or 5
+			if atkDmg > 0 and targetChar then
+				local realDist = (targetPos - root.Position).Magnitude
+				local cd = tonumber(model:GetAttribute("AI_AttackCooldown")) or 1.4
+				if realDist <= atkRange and (os.clock() - (state.lastAttack or 0)) >= cd then
+					state.lastAttack = os.clock()
+					faceTarget(root, targetPos)
+					local atkAnim = model:GetAttribute("AI_AttackAnim")
+					if AIKit and atkAnim and atkAnim ~= "" then
+						pcall(function() AIKit.PlayAnim(model, tostring(atkAnim), { priority = "Action" }) end)
+					end
+					local tHum = targetChar:FindFirstChildOfClass("Humanoid")
+					if tHum and tHum.Health > 0 then tHum:TakeDamage(atkDmg) end
+				end
 			end
 		else
 			local homePos = state.home
 			if hasRestrict then
 				homePos = Vector3.new(clampAxis(homePos.X, state.home.X, rx), root.Position.Y, clampAxis(homePos.Z, state.home.Z, rz))
 			end
-			hum:MoveTo(homePos)
+			moveSmart(hum, root, homePos, not hasRestrict, state)
 		end
-		task.wait(0.15)
+		task.wait(0.2)
 	else
 		task.wait(0.5)
 	end
@@ -1712,13 +1785,22 @@ end
 local function run(model)
 	if brains[model] or not model:IsA("Model") then return end
 	brains[model] = true
+	local template = nil
+	local respawnTime = tonumber(model:GetAttribute("AI_RespawnTime"))
+	if respawnTime and respawnTime > 0 then
+		pcall(function()
+			model.Archivable = true
+			template = model:Clone()
+		end)
+	end
+	local parentRef = model.Parent
 	task.spawn(function()
 		local hum = model:WaitForChild("Humanoid", 10)
 		local root = model:WaitForChild("HumanoidRootPart", 10)
 		if not hum or not root then brains[model] = nil return end
 		if model:GetAttribute("AI_Behavior") ~= "idle" then root.Anchored = false end
 		pcall(function() root:SetNetworkOwner(nil) end)
-		local state = {home = root.Position, patrolIndex = 1}
+		local state = { home = root.Position, patrolIndex = 1, lastAttack = 0 }
 		while model.Parent and hum.Health > 0 do
 			local ok, err = pcall(step, model, hum, root, state)
 			if not ok then
@@ -1727,6 +1809,12 @@ local function run(model)
 			end
 		end
 		brains[model] = nil
+		if template and respawnTime and respawnTime > 0 and parentRef and parentRef.Parent then
+			task.wait(respawnTime)
+			if model.Parent then pcall(function() model:Destroy() end) end
+			local fresh = template:Clone()
+			fresh.Parent = parentRef
+		end
 	end)
 end
 
@@ -2408,15 +2496,43 @@ local function executeActions(actions)
 				if objs and #objs > 0 then
 					local assetObj = objs[1]
 					if act.name and act.name ~= "" then assetObj.Name = act.name end
-					if act.strip_scripts == true then
+					if act.strip_scripts ~= false then
 						for _, d in ipairs(assetObj:GetDescendants()) do if d:IsA("LuaSourceContainer") then d:Destroy() end end
 					end
+					if act.anchor_all ~= false then
+						if assetObj:IsA("BasePart") then assetObj.Anchored = true end
+						for _, d in ipairs(assetObj:GetDescendants()) do
+							if d:IsA("BasePart") then d.Anchored = true end
+						end
+					end
 					assetObj.Parent = resolveOrSearchPath(act.parent) or workspace
-					if act.scale and type(act.scale) == "number" and act.scale > 0 and assetObj:IsA("Model") then pcall(function() assetObj:ScaleTo(act.scale) end) end
-					local pos, rot = act.position or {0, 5, 0}, act.rotation or {0, 0, 0}
-					local targetCF = CFrame.new(pos[1] or 0, pos[2] or 5, pos[3] or 0) * CFrame.Angles(math.rad(rot[1] or 0), math.rad(rot[2] or 0), math.rad(rot[3] or 0))
-					if assetObj:IsA("Model") then pcall(function() assetObj:PivotTo(targetCF) end) elseif assetObj:IsA("BasePart") then assetObj.CFrame = targetCF end
-					table.insert(logs, "📦 3D Model Eklendi: " .. assetObj.Name)
+					if assetObj:IsA("Model") then
+						if act.target_size and type(act.target_size) == "number" and act.target_size > 0 then
+							local okSz, _, sz = pcall(function() return assetObj:GetBoundingBox() end)
+							if okSz and sz then
+								local maxDim = math.max(sz.X, sz.Y, sz.Z)
+								if maxDim > 0.05 then pcall(function() assetObj:ScaleTo(act.target_size / maxDim) end) end
+							end
+						elseif act.scale and type(act.scale) == "number" and act.scale > 0 then
+							pcall(function() assetObj:ScaleTo(act.scale) end)
+						end
+					end
+					local pos, rot = act.position or {0, 0, 0}, act.rotation or {0, 0, 0}
+					local targetCF = CFrame.new(pos[1] or 0, pos[2] or 0, pos[3] or 0) * CFrame.Angles(math.rad(rot[1] or 0), math.rad(rot[2] or 0), math.rad(rot[3] or 0))
+					if assetObj:IsA("Model") then
+						pcall(function() assetObj:PivotTo(targetCF) end)
+						if act.snap_to_ground ~= false then
+							local okB, bCF, bSz = pcall(function() return assetObj:GetBoundingBox() end)
+							if okB and bCF and bSz then
+								local bottomY = bCF.Position.Y - (bSz.Y * 0.5)
+								local dy = (pos[2] or 0) - bottomY
+								pcall(function() assetObj:PivotTo(assetObj:GetPivot() + Vector3.new(0, dy, 0)) end)
+							end
+						end
+					elseif assetObj:IsA("BasePart") then
+						assetObj.CFrame = targetCF + Vector3.new(0, assetObj.Size.Y * 0.5, 0)
+					end
+					table.insert(logs, "📦 3D Model Eklendi (zemine oturtuldu): " .. assetObj.Name)
 				end
 
 			elseif t == "terrain_fill" then
