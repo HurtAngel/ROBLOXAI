@@ -218,7 +218,8 @@ def init_db():
             "- Prefer authentic Roblox VFX: `ParticleEmitter` (TextureIds: `rbxassetid://243098098` soft glow, `rbxassetid://241650934` spark/slash, `rbxassetid://243660364` smoke/mist), `Trail`, `Beam`, `PointLight`, `BloomEffect`, and `ColorCorrectionEffect`.\n"
             "- Use `run_luau` ONLY for Edit-Mode procedural construction. Put all runtime logic in `write_script`.\n"
             "- Use `RunService.Heartbeat(dt)` instead of `while wait()`.\n"
-            "- For Studio Animation Editor `KeyframeSequence` assets, use `create_animation` with chronological `keyframes` and `poses`.\n\n"
+            "- OFFICIAL RIG CREATION (ANIMATION EDITOR READY): NEVER build humanoid characters/NPCs/bosses from raw `Part`s! ALWAYS spawn an official R15/R6 rig via `run_luau` using `Players:CreateHumanoidModelFromDescription(Instance.new(\"HumanoidDescription\"), Enum.HumanoidRigType.R15)` (or `R6`), set `HumanoidRootPart.Anchored = true` and ALL other BaseParts `Anchored = false`, then customize appearance/weapons.\n"
+            "- For Studio Animation Editor `KeyframeSequence` assets, use `create_animation` with chronological `keyframes`, `poses`, and the exact `rig_path` (e.g. `Workspace.RigName`) so it is saved into `Rig.AnimSaves`.\n\n"
             "6. SUPPORTED JSON ACTION FORMATS:\n"
             "- {\"type\": \"create_instance\", \"class\": \"Part|ScreenGui|Frame|RemoteEvent\", \"name\": \"...\", \"parent\": \"Workspace|StarterGui|ReplicatedStorage\", \"properties\": {...}}\n"
             "- {\"type\": \"edit_instance\", \"path\": \"...\", \"properties\": {...}}\n"
@@ -270,6 +271,11 @@ def build_dynamic_directives(prompt_text: str, directives_cfg: dict) -> list[str
     req_cam = bool(cfg.get("req_cam", False))
     req_vfx = bool(cfg.get("req_vfx", False))
     req_weapon = bool(cfg.get("req_weapon", False))
+    req_rig = any(k in p for k in [
+        "rig", "karakter", "character", "npc", "dummy", "boss", "düşman", "enemy",
+        "insan", "humanoid", "r6", "r15", "animasyon", "animation", "animate",
+        "canavar", "monster", "fighter", "warrior", "savaşçı", "adam", "asker", "avatar"
+    ])
 
     if auto_mode:
         if any(k in p for k in ["combat", "slash", "combo", "punch", "kick", "anime", "boss", "yetenek", "dövüş", "savaş", "saldırı", "animasyon", "ability", "glitch", "skill"]):
@@ -281,6 +287,21 @@ def build_dynamic_directives(prompt_text: str, directives_cfg: dict) -> list[str
             req_weapon = True
 
     rules = []
+    if req_rig:
+        rules.append(
+            "[RESMİ ROBLOX RIG & ANIMATION EDITOR KURALI]: İnsansı bir karakter, NPC, Dummy veya Boss oluştururken "
+            "ASLA sıfırdan ham Part/blok birleştirerek karakter yapma! "
+            "Bunun yerine `run_luau` aksiyonu ile mutlaka Roblox'un resmi R15/R6 rig üreticisini kullan:\n"
+            "local Players = game:GetService('Players'); "
+            "local desc = Instance.new('HumanoidDescription'); "
+            "local rig = Players:CreateHumanoidModelFromDescription(desc, Enum.HumanoidRigType.R15) -- (R6 istenirse R6); "
+            "rig.Name = 'RigAdi'; rig.Parent = workspace; rig:PivotTo(CFrame.new(0, 5, 0)); "
+            "for _, p in ipairs(rig:GetDescendants()) do if p:IsA('BasePart') then p.Anchored = (p.Name == 'HumanoidRootPart') end end\n"
+            "KRİTİK: Roblox Studio Animation Editor'ın rigi hareket ettirebilmesi için SADECE `HumanoidRootPart.Anchored = true` olmalı, "
+            "tüm diğer uzuv parçaları `Anchored = false` olmalı ve eklemler `Motor6D` ile bağlı kalmalıdır (özel/insansı olmayan yaratık rigi yapıyorsan da PrimaryPart=HumanoidRootPart, Humanoid+Animator ve tüm uzuvlar Motor6D + Anchored=false olmalıdır). "
+            "Ardından renk, zırh, kıyafet veya silahı bu resmi rigin üzerine ekle. "
+            "Animasyon eklerken aynı `actions` listesinde `run_luau` sonrasında `create_animation` aksiyonunu `\"rig_path\": \"Workspace.RigAdi\"` ile çağır ki animasyon doğrudan `RigAdi.AnimSaves` içine kaydedilip Studio Animation Editor'dan açılabilsin."
+        )
     if req_anim:
         rules.append(
             "[ZORUNLU KARAKTER ANİMASYONU]: Karakter asla kütük gibi sabit kalmamalıdır! "
