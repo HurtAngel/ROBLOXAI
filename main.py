@@ -1733,9 +1733,11 @@ async def discover_project(request: Request, client_key: str = Header(None)):
     status = str(parsed.get("status") or ("ready" if session["round"] >= 2 else "needs_clarification")).strip().lower()
     if status not in ("needs_clarification", "ready"):
         status = "needs_clarification" if parsed.get("questions") else "ready"
+    if session["round"] >= 2:
+        status = "ready"
 
     questions = parsed.get("questions") if isinstance(parsed.get("questions"), list) else []
-    questions = [str(q).strip() for q in questions if str(q).strip()][:5]
+    questions = [str(q).strip() for q in questions if str(q).strip()][:4]
     if status == "ready":
         questions = []
 
